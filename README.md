@@ -4,49 +4,45 @@ A terminal coding agent that runs against **your own LLM server**. No telemetry,
 
 ---
 
-## Install
+## For users
+
+### Install
+
+You receive a single file (`omp-install.sh`) from your team. Run it:
 
 ```sh
 bash omp-install.sh
 ```
 
-The installer asks three things:
+It asks three things:
 
 1. **Server URL** — e.g. `http://localhost:11434/v1` for Ollama
 2. **API key** — press Enter if your server doesn't need one
 3. **Model name** — e.g. `gemma4`, `llama3.1`, `deepseek-coder`
 
-It tests the connection, writes the config, and adds `omp` to your PATH.
-
-Then:
+It tests the connection, installs the `omp` binary, and you're done.
 
 ```sh
 omp
 ```
 
-> macOS Apple Silicon (darwin-arm64) only.
+> Requires: macOS Apple Silicon. No Bun, Rust, or internet needed.
 
 ---
 
-## Setup without the installer
+### Change LLM provider later
 
-If you're running from source or want to configure manually:
+Inside any omp session:
 
-**Option A — Interactive UI (inside omp):**
-
-```sh
-omp
-# Inside the session, use the /provider command:
-/provider add       # creates models.yml with a starter template
-/provider edit      # opens models.yml in your editor
-/provider test      # tests connectivity to your server
-/provider reload    # reloads after you edit the config
-/provider           # lists current providers and models
+```
+/provider           — list current providers and models
+/provider add       — create config with a starter template
+/provider edit      — open config in your editor
+/provider test      — test connectivity
+/provider reload    — apply changes without restarting
 ```
 
-**Option B — Config file:**
-
-Create `~/.omp/agent/models.yml`:
+Or edit `~/.omp/agent/models.yml` directly:
 
 ```yaml
 providers:
@@ -61,7 +57,7 @@ providers:
         maxTokens: 8192
 ```
 
-Add multiple models if your server exposes them:
+Multiple models:
 
 ```yaml
     models:
@@ -75,13 +71,11 @@ Add multiple models if your server exposes them:
         maxTokens: 4096
 ```
 
-Verify: `omp models ls`
-
-Switch models inside a session: `/model`
+Verify: `omp models ls` · Switch in session: `/model`
 
 ---
 
-## What it does
+### What it does
 
 | Feature | Description |
 |---------|-------------|
@@ -98,7 +92,7 @@ Switch models inside a session: `/model`
 
 ---
 
-## Memory & self-learning
+### Memory & self-learning
 
 Enabled by default. The agent:
 
@@ -108,7 +102,7 @@ Enabled by default. The agent:
 - Recalls relevant memories at session start
 - All stored in `~/.omp/agent/memories/` — nothing leaves your machine
 
-**Embeddings (optional):** improve recall quality with semantic search. Configure via `/settings → Memory → Mnemopi` or in `~/.omp/agent/config.yml`:
+**Embeddings (optional):** improve recall with semantic search. Add to `~/.omp/agent/config.yml`:
 
 ```yaml
 mnemopi:
@@ -118,13 +112,13 @@ mnemopi:
   embeddingModel: "nomic-embed-text"
 ```
 
-Without embeddings, memory falls back to keyword search — still works, just matches words not meaning.
+Without embeddings, memory uses keyword search — still works fine.
 
 ---
 
-## Model roles (optional)
+### Model roles (optional)
 
-Route different tasks to different models. Add to `~/.omp/agent/config.yml`:
+Route tasks to different models. Add to `~/.omp/agent/config.yml`:
 
 ```yaml
 modelRoles:
@@ -132,11 +126,11 @@ modelRoles:
   smol: custom/gemma4
 ```
 
-Available roles: `default`, `smol`, `slow`, `plan`, `commit`, `vision`, `designer`, `task`, `advisor`, `tiny`. Unset roles fall back to any available model.
+Available roles: `default`, `smol`, `slow`, `plan`, `commit`, `vision`, `designer`, `task`, `advisor`, `tiny`.
 
 ---
 
-## Commands
+### Commands reference
 
 ```sh
 omp                    # Interactive session
@@ -152,10 +146,7 @@ Inside a session:
 
 | Command | What it does |
 |---------|-------------|
-| `/provider` | List, add, edit, test, reload LLM providers |
-| `/provider add` | Create models.yml with starter config |
-| `/provider test` | Test connection to all providers |
-| `/provider reload` | Pick up config changes without restarting |
+| `/provider` | Manage LLM providers (add, edit, test, reload) |
 | `/model` | Switch between configured models |
 | `/settings` | Full settings UI |
 | `/memory` | View/manage memory state |
@@ -165,9 +156,23 @@ Inside a session:
 
 ---
 
-## Building the installer
+## For developers
 
-Requires Bun + Rust:
+> This section is only for people building omp from source.
+
+### Prerequisites
+
+- [Bun](https://bun.sh) ≥ 1.4
+- Rust (nightly, via `rust-toolchain.toml`)
+
+### Run from source
+
+```sh
+bun setup        # install deps + build native Rust addon
+bun run dev      # start omp from source
+```
+
+### Build the installer
 
 ```sh
 bun setup
@@ -175,22 +180,19 @@ bun run --cwd packages/coding-agent build
 bash scripts/build-installer.sh
 ```
 
-Produces `packages/coding-agent/dist/omp-install.sh` — one file, no internet needed on the target machine.
+Output: `packages/coding-agent/dist/omp-install.sh` — one file you hand to users.
 
----
-
-## Development
+### Tests
 
 ```sh
-bun setup        # Install dependencies + build native Rust addon
-bun run dev      # Run from source
-bun run test     # Run tests
-bun run check    # Lint + typecheck
+bun run test     # run tests
+bun run check    # lint + typecheck
+bun run perf     # local performance report
 ```
 
 After changing Rust crates: `bun run build:native`
 
-See [packages/coding-agent/DEVELOPMENT.md](packages/coding-agent/DEVELOPMENT.md) and [docs/](docs/).
+More: [packages/coding-agent/DEVELOPMENT.md](packages/coding-agent/DEVELOPMENT.md) and [docs/](docs/).
 
 ---
 
