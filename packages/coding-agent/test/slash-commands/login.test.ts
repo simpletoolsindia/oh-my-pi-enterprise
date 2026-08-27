@@ -69,28 +69,6 @@ describe("/login slash command", () => {
 		expect(harness.getSelectorMode()).toBe("login");
 	});
 
-	it("routes /login kagi to direct provider login", async () => {
-		const manualInput = new OAuthManualInputManager();
-		const harness = createRuntimeHarness(manualInput);
-
-		const handled = await executeBuiltinSlashCommand("/login kagi", harness.runtime);
-
-		expect(handled).toBe(true);
-		expect(harness.getSelectorMode()).toBe("login");
-		expect(harness.getSelectorProvider()).toBe("kagi");
-	});
-
-	it("routes /login parallel to direct provider login", async () => {
-		const manualInput = new OAuthManualInputManager();
-		const harness = createRuntimeHarness(manualInput);
-
-		const handled = await executeBuiltinSlashCommand("/login parallel", harness.runtime);
-
-		expect(handled).toBe(true);
-		expect(harness.getSelectorMode()).toBe("login");
-		expect(harness.getSelectorProvider()).toBe("parallel");
-	});
-
 	it("warns when no pending login exists for manual callback", async () => {
 		const manualInput = new OAuthManualInputManager();
 		const harness = createRuntimeHarness(manualInput);

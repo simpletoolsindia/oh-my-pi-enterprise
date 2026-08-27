@@ -738,7 +738,6 @@ describe("AgentSession prewalk", () => {
 			session,
 			sessionManager,
 			settings,
-			collabGuest: false,
 			showStatus,
 			editor: { setText: vi.fn() },
 			refreshSlashCommandState: vi.fn(),

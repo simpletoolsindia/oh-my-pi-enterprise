@@ -1,6 +1,9 @@
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
-import { COLLAB_GUEST_ALLOWED_COMMANDS } from "../collab/guest";
-import { BUILTIN_COLLABORATION_SLASH_COMMANDS } from "./builtin-collaboration";
+import { reset as resetCapabilities } from "../capability";
+import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../discovery/helpers.js";
+import { MCPCommandController } from "../modes/controllers/mcp-command-controller";
+import type { InteractiveModeContext } from "../modes/types";
+import { refreshAgentDiscovery } from "../task";
 import {
 	buildArgumentCompletions,
 	buildDirectoryArgumentCompletions,
@@ -10,7 +13,6 @@ import {
 } from "./builtin-completions";
 import { BUILTIN_CONTROL_SLASH_COMMANDS } from "./builtin-control";
 import { BUILTIN_LIFECYCLE_SLASH_COMMANDS } from "./builtin-lifecycle";
-import { BUILTIN_MARKETPLACE_SLASH_COMMANDS, reloadTuiPluginState } from "./builtin-marketplace";
 import { BUILTIN_MODE_SLASH_COMMANDS } from "./builtin-modes";
 import { BUILTIN_SESSION_SLASH_COMMANDS } from "./builtin-session";
 import { parseSlashCommand } from "./helpers/parse";
@@ -25,6 +27,26 @@ import type {
 
 export type { BuiltinSlashCommand, SubcommandDef } from "./types";
 
+/**
+ * Reload the interactive session's local extensibility state: invalidate
+ * fs/plugin-root caches, rediscover skills, file slash commands, and task
+ * agents, reset the capability cache, and reconnect MCP servers (rebinding
+ * the session's MCP tools). Shared by `/reload-plugins`'s TUI handler and the
+ * `handle`-adapter's `reloadPlugins` hook so both honor the command's
+ * documented reload scope. Purely local — no network I/O.
+ */
+export async function reloadTuiPluginState(ctx: InteractiveModeContext): Promise<void> {
+	const projectPath = await resolveActiveProjectRegistryPath(ctx.sessionManager.getCwd());
+	clearPluginRootsAndCaches(projectPath ? [projectPath] : undefined);
+	await refreshAgentDiscovery(ctx.sessionManager.getCwd());
+	await ctx.refreshSkillState();
+	await ctx.refreshSlashCommandState();
+	resetCapabilities();
+	if (ctx.mcpManager) {
+		await new MCPCommandController(ctx).reloadServers();
+	}
+}
+
 /** TUI-specific runtime accepted by `executeBuiltinSlashCommand`. */
 export type BuiltinSlashCommandRuntime = TuiSlashCommandRuntime;
 
@@ -36,10 +58,8 @@ export interface TuiBuiltinSlashCommand extends BuiltinSlashCommand {
 
 const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<SlashCommandSpec> = [
 	...BUILTIN_MODE_SLASH_COMMANDS,
-	...BUILTIN_COLLABORATION_SLASH_COMMANDS,
 	...BUILTIN_SESSION_SLASH_COMMANDS,
 	...BUILTIN_LIFECYCLE_SLASH_COMMANDS,
-	...BUILTIN_MARKETPLACE_SLASH_COMMANDS,
 	...BUILTIN_CONTROL_SLASH_COMMANDS,
 ];
 
@@ -127,13 +147,6 @@ export async function executeBuiltinSlashCommand(
 	if (!command) return false;
 	if (parsed.args.length > 0 && !command.allowArgs) {
 		return false;
-	}
-	// Collab guests run a read-mostly replica: session-mutating builtins are
-	// host-only; the allowlist covers purely local/read-only commands.
-	if (runtime.ctx.collabGuest && !COLLAB_GUEST_ALLOWED_COMMANDS[command.name]) {
-		runtime.ctx.showStatus(`/${command.name} is host-only during a collab session`);
-		runtime.ctx.editor.setText("");
-		return true;
 	}
 	if (command.handleTui) {
 		const result = await command.handleTui(parsed, runtime);

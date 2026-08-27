@@ -26,7 +26,10 @@ const counts = {
 	afterValidation: -1,
 };
 
-const disabledTools = await createTools(toolSession(Settings.isolated()), ["computer"]);
+const disabledTools = await createTools(
+	toolSession(Settings.isolated({ "autolearn.enabled": false, "memory.backend": "off" })),
+	["computer"],
+);
 counts.afterDefaultOffFactory = count();
 
 const firstTool = await BUILTIN_TOOLS.computer(toolSession(Settings.isolated()));

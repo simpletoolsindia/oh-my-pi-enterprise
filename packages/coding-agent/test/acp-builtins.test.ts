@@ -80,6 +80,9 @@ interface FakeAcpBuiltinSessionManager {
 
 function createRuntime() {
 	const settings = Settings.isolated();
+	// Set (not override) so tests can still flip these via settings.set(...).
+	settings.set("autolearn.enabled", false);
+	settings.set("memory.backend", "off");
 	const output: string[] = [];
 	let fakeSessionManager: FakeAcpBuiltinSessionManager | undefined;
 	const session: FakeAcpBuiltinSession = {
@@ -1002,29 +1005,6 @@ describe("wave 4 commands", () => {
 		expect(output[0]).toContain("Unknown");
 	});
 
-	// /marketplace
-	it("/marketplace help: outputs help text", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/marketplace help", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("Marketplace commands");
-		expect(output[0]).toContain("install");
-	});
-
-	it("/marketplace install (no args): returns interactive picker usage", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/marketplace install", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("TUI-only");
-	});
-
-	it("/marketplace uninstall (no args): returns interactive picker usage", async () => {
-		const { output, runtime } = createRuntime();
-		const result = await executeAcpBuiltinSlashCommand("/marketplace uninstall", runtime);
-		expect(result).toEqual({ consumed: true });
-		expect(output[0]).toContain("TUI-only");
-	});
-
 	// /plugins
 
 	// /todo start with in_progress status in fuzzy list
@@ -1200,24 +1180,6 @@ describe("wave 5 — adapters and polish", () => {
 		const result = await executeAcpBuiltinSlashCommand("/jobs", runtime);
 		expect(result).toEqual({ consumed: true });
 		expect(output[0]).toContain("background jobs");
-	});
-
-	// /marketplace discover bulleted list
-	it("/marketplace discover: output is bulleted with '  - ' token", async () => {
-		const { MarketplaceManager } = await import("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace");
-		const discoverSpy = spyOn(MarketplaceManager.prototype, "listAvailablePlugins").mockResolvedValue([
-			{ name: "hello", version: "1.0.0", description: "A greeting plugin" } as never,
-			{ name: "world", version: "2.0.0", description: undefined } as never,
-		]);
-		try {
-			const { output, runtime } = createRuntime();
-			const result = await executeAcpBuiltinSlashCommand("/marketplace discover", runtime);
-			expect(result).toEqual({ consumed: true });
-			expect(output[0]).toContain("  - ");
-			expect(output[0]).toContain("hello@1.0.0");
-		} finally {
-			discoverSpy.mockRestore();
-		}
 	});
 });
 

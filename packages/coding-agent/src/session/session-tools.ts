@@ -217,8 +217,8 @@ export class SessionTools {
 	 * ("replace the system prompt for this turn"). While set, base-prompt
 	 * rebuilds keep this override on the agent instead of the rebuilt base, so a
 	 * rebuild landing in the prompt window (compaction/promotion, memory
-	 * promotion, MCP/RPC tool refresh, hindsight MM-TTL refresh) cannot silently
-	 * drop it before the request. Cleared when the turn ends.
+	 * promotion, MCP/RPC tool refresh) cannot silently drop it before the
+	 * request. Cleared when the turn ends.
 	 */
 	#turnSystemPromptOverride: string[] | undefined;
 	#lastAppliedToolSignature: string | undefined;

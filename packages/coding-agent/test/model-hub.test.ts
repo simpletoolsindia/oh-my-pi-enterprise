@@ -326,24 +326,6 @@ describe("ModelHub", () => {
 			expect(normalize(hub.render(220))).toContain("All available models");
 			expect(footerLine(hub.render(220))).toContain("↑/↓ models · ← providers");
 		});
-
-		test("typing while on a locked provider in scope focus switches to All models and focuses model list", () => {
-			const model = makeModel("anthropic", "claude-locked-test");
-			const { hub } = createHub({
-				models: [model],
-				registry: { getAvailable: () => [] },
-			});
-			installTestTheme();
-
-			hub.handleInput(DOWN); // All models → locked anthropic
-			expect(normalize(hub.render(220))).toContain("anthropic has no credentials configured");
-			expect(footerLine(hub.render(220))).toContain("Enter log in");
-
-			// Typing a search character switches to All models and focuses list
-			hub.handleInput("t");
-			expect(normalize(hub.render(220))).toContain("All available models");
-			expect(footerLine(hub.render(220))).toContain("↑/↓ models · ← providers");
-		});
 	});
 
 	describe("quick-switch cycle and custom roles", () => {
@@ -1161,25 +1143,6 @@ describe("ModelHub", () => {
 			gate.resolve();
 			await Bun.sleep(0);
 			expect(normalize(hub.render(220))).not.toContain("refreshing model list");
-		});
-	});
-
-	describe("locked providers", () => {
-		test("catalog providers without credentials appear locked and forward to login", () => {
-			const anthropicModel = makeModel("anthropic", "claude-locked-test");
-			const { hub, onLoginRequest } = createHub({
-				models: [anthropicModel],
-				registry: { getAvailable: () => [] },
-			});
-			installTestTheme();
-
-			hub.handleInput(DOWN); // All models → locked anthropic (separator skipped)
-			const rendered = normalize(hub.render(220));
-			expect(rendered).toContain("anthropic has no credentials configured");
-			expect(rendered).toContain("claude-locked-test");
-
-			hub.handleInput("\n");
-			expect(onLoginRequest).toHaveBeenCalledWith("anthropic");
 		});
 	});
 });

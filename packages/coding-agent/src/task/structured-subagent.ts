@@ -156,7 +156,7 @@ export class StructuredSubagentError extends Error {
 	}
 }
 
-const PLAN_MODE_TOOLS = ["read", "grep", "glob", "web_search"] as const;
+const PLAN_MODE_TOOLS = ["read", "grep", "glob"] as const;
 
 function renderSubagentPrompt(assignment: string): string {
 	return prompt.render(subagentUserPromptTemplate, { assignment: assignment.trim() });
@@ -443,7 +443,6 @@ function buildExecutorOptions(
 		preloadedCustomToolPaths: restrictToolNames ? [] : session.customToolPaths,
 		localProtocolOptions,
 		parentArtifactManager: session.getArtifactManager?.() ?? undefined,
-		parentHindsightSessionState: session.getHindsightSessionState?.(),
 		parentMnemopiSessionState: session.getMnemopiSessionState?.(),
 		parentTelemetry: session.getTelemetry?.(),
 		parentEvalSessionId: request.shareEvalSession === false ? undefined : (session.getEvalSessionId?.() ?? undefined),

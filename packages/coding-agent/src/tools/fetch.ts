@@ -3,7 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
-import { type FetchImpl, getEnvApiKey, type ImageContent, type TextContent } from "@oh-my-pi/pi-ai";
+import type { FetchImpl, ImageContent, TextContent } from "@oh-my-pi/pi-ai";
 import { htmlToMarkdown } from "@oh-my-pi/pi-natives";
 import { type Component, Text } from "@oh-my-pi/pi-tui";
 import { $which, ptree, truncate } from "@oh-my-pi/pi-utils";
@@ -21,11 +21,9 @@ import { webpExclusionForModel } from "../utils/image-loading";
 import { formatDimensionNote, resizeImage } from "../utils/image-resize";
 import { CONVERTIBLE_EXTENSIONS } from "../utils/markit";
 import { ensureTool } from "../utils/tools-manager";
-import { extractWithParallel, findParallelApiKey, getParallelExtractContent } from "../web/parallel";
 import type { RenderResult, SpecialHandler } from "../web/scrapers/types";
 import { finalizeOutput, loadPage, looksLikeHtml, MAX_BYTES, MAX_OUTPUT_CHARS } from "../web/scrapers/types";
 import { convertWithMarkit, fetchBinary } from "../web/scrapers/utils";
-import { findCredential } from "../web/search/providers/utils";
 import { applyListLimit } from "./list-limit";
 import { formatStyledArtifactReference, type OutputMeta } from "./output-meta";
 import { isReadableUrlPath, type LineRange, parseLineRanges } from "./path-utils";
@@ -571,45 +569,22 @@ async function parseFeedToMarkdown(content: string, maxItems = 10): Promise<stri
 	return content; // Fall back to raw content
 }
 
-/**
- * Cap on any single remote reader-mode request (Parallel, Jina) so a stalled
- * remote endpoint cannot consume the whole reader-mode budget and starve the
- * local fallback renderers (trafilatura, lynx, native). See #1449.
- */
-const REMOTE_READER_MAX_MS = 10_000;
-const JINA_MARKDOWN_MARKER = "Markdown Content:";
-const JINA_READER_MAX_BYTES = 2 * 1024 * 1024;
-
-function parseJinaReaderContent(responseBody: string): string | null {
-	const markerStart = responseBody.indexOf(JINA_MARKDOWN_MARKER);
-	if (markerStart < 0) return null;
-
-	const content = responseBody.slice(markerStart + JINA_MARKDOWN_MARKER.length).trim();
-	if (content.length < 100 || content.startsWith("Loading...") || content.startsWith("Please enable JavaScript")) {
-		return null;
-	}
-	return content;
-}
-
 /** Reader backends for {@link renderHtmlToText}, in default priority order. */
-export type FetchProvider = "native" | "trafilatura" | "lynx" | "parallel" | "jina";
+export type FetchProvider = "native" | "trafilatura" | "lynx";
 
-const FETCH_PROVIDER_ORDER: readonly FetchProvider[] = ["native", "trafilatura", "lynx", "parallel", "jina"];
+const FETCH_PROVIDER_ORDER: readonly FetchProvider[] = ["native", "trafilatura", "lynx"];
 
 /**
  * Render HTML to markdown by trying reader backends in priority order: native
- * (in-process), trafilatura, lynx, Parallel, then Jina. The `providers.fetch`
- * setting picks the order — `auto` uses the default above; any specific backend
- * is tried first, then the remaining backends as fallbacks. Every backend's
- * output must clear the same quality gate (>100 non-whitespace chars and not
+ * (in-process), trafilatura, then lynx. The `providers.fetch` setting picks the
+ * order — `auto` uses the default above; any specific backend is tried first,
+ * then the remaining backends as fallbacks. Every backend's output must clear
+ * the same quality gate (>100 non-whitespace chars and not
  * {@link isLowQualityOutput}) before it is accepted, otherwise the next backend
- * is tried.
+ * is tried. Only a real `userSignal` cancellation aborts the chain (#1449).
  *
- * The overall `timeout` budget bounds the whole call; remote backends (Parallel,
- * Jina) are additionally capped at `REMOTE_READER_MAX_MS` so a hung endpoint
- * cannot starve later renderers — especially the purely-local native converter,
- * which always works on already-loaded HTML. Only a real `userSignal`
- * cancellation aborts the chain (#1449).
+ * All backends are local (in-process conversion or a local subprocess) — this
+ * tool never calls a third-party reader/extraction API.
  */
 export async function renderHtmlToText(
 	url: string,
@@ -617,8 +592,8 @@ export async function renderHtmlToText(
 	timeout: number,
 	settings: Settings,
 	userSignal: AbortSignal | undefined,
-	storage: AgentStorage | null,
-	fetchOverride?: FetchImpl,
+	_storage: AgentStorage | null,
+	_fetchOverride?: FetchImpl,
 ): Promise<{ content: string; ok: boolean; method: string }> {
 	const overallSignal = ptree.combineSignals(userSignal, timeout * 1000);
 	const execOptions = {
@@ -628,15 +603,8 @@ export async function renderHtmlToText(
 		stderr: "full" as const,
 		signal: overallSignal,
 	};
-	const remoteBudgetMs = Math.min(timeout * 1000, REMOTE_READER_MAX_MS);
-	// Per-attempt budget for remote endpoints so one stall cannot consume the
-	// whole reader-mode budget and starve the local fallbacks.
-	const remoteSignal = () => ptree.combineSignals(userSignal, remoteBudgetMs);
-	const fetchImpl = fetchOverride ?? fetch;
 
 	const runners: Record<FetchProvider, () => Promise<string | null>> = {
-		// Purely local, no network/subprocess: still works on already-loaded HTML
-		// even after remote/subprocess attempts are aborted by the budget.
 		native: () => htmlToMarkdown(html, { cleanContent: true }),
 		trafilatura: async () => {
 			const trafilatura = await ensureTool("trafilatura", { signal: overallSignal, silent: true });
@@ -648,38 +616,6 @@ export async function renderHtmlToText(
 			if (!hasCommand("lynx")) return null;
 			const result = await ptree.exec(["lynx", "-dump", "-nolist", "-width", "250", url], execOptions);
 			return result.ok ? result.stdout : null;
-		},
-		parallel: async () => {
-			if (!findParallelApiKey(storage)) return null;
-			const parallelResult = await extractWithParallel(
-				[url],
-				{
-					objective: "Extract the main content",
-					excerpts: true,
-					fullContent: false,
-					signal: remoteSignal(),
-					fetch: fetchImpl,
-				},
-				storage,
-			);
-			const firstDocument = parallelResult.results[0];
-			return firstDocument ? getParallelExtractContent(firstDocument) : null;
-		},
-		jina: async () => {
-			const apiKey = findCredential(storage, getEnvApiKey("jina"), "jina");
-			const headers: Record<string, string> = {
-				Accept: "text/markdown",
-				"X-No-Cache": "true",
-			};
-			if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-			const response = await fetchImpl(`https://r.jina.ai/${url}`, {
-				headers,
-				signal: remoteSignal(),
-			});
-			if (!response.ok) return null;
-			const contentLength = Number(response.headers.get("content-length"));
-			if (Number.isFinite(contentLength) && contentLength > JINA_READER_MAX_BYTES) return null;
-			return parseJinaReaderContent(await response.text());
 		},
 	};
 
@@ -1437,7 +1373,7 @@ async function renderUrl(
 			throw new ToolAbortError();
 		}
 
-		// 5E: Render HTML via the reader-backend chain (native/trafilatura/lynx/parallel/jina)
+		// 5E: Render HTML via the reader-backend chain (native/trafilatura/lynx)
 		const htmlResult = await renderHtmlToText(
 			finalUrl,
 			rawContent,

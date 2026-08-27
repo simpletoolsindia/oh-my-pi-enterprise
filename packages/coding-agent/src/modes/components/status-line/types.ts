@@ -1,4 +1,3 @@
-import type { CollabSessionState } from "../../../collab/protocol";
 import type {
 	ContextLineMode,
 	StatusLinePreset,
@@ -16,7 +15,9 @@ export interface CollabStatus {
 	role: "host" | "guest";
 	participantCount: number;
 	/** Guest only: host footer snapshot that overrides locally computed values. */
-	stateOverride?: CollabSessionState | null;
+	stateOverride?: {
+		contextUsage?: { contextWindow: number | null; tokens: number | null; percent: number | null };
+	} | null;
 }
 
 export interface StatusLineSegmentOptions {

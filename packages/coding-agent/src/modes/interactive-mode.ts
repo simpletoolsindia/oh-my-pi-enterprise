@@ -53,8 +53,6 @@ import {
 } from "@oh-my-pi/pi-utils";
 import chalk from "@oh-my-pi/pi-utils/chalk";
 import { reset as resetCapabilities } from "../capability";
-import type { CollabGuestLink } from "../collab/guest";
-import type { CollabHost } from "../collab/host";
 import { KeybindingsManager } from "../config/keybindings";
 import { formatModelString, type ResolvedModelRoleValue } from "../config/model-resolver";
 import { applyProviderGlobalsFromSettings } from "../config/provider-globals";
@@ -62,7 +60,7 @@ import {
 	isSettingsInitialized,
 	onModelRolesChanged,
 	onStatusLineSessionAccentChanged,
-	Settings,
+	type Settings,
 	settings,
 } from "../config/settings";
 import { clearClaudePluginRootsCache } from "../discovery/helpers";
@@ -126,7 +124,6 @@ import { tinyTitleClient } from "../tiny/title-client";
 import type { LspStartupServerInfo } from "../tools";
 import { normalizeLocalScheme, resolveToCwd } from "../tools/path-utils";
 import { formatMoreItems, replaceTabs, shortenPath, TRUNCATE_LENGTHS, truncateToWidth } from "../tools/render-utils";
-import { setAutoQaConsentHandler } from "../tools/report-tool-issue";
 import {
 	formatPhaseDisplayName,
 	isClosedTodo,
@@ -710,8 +707,6 @@ export class InteractiveMode implements InteractiveModeContext {
 	fileSlashCommands: Set<string> = new Set();
 	skillCommands: Map<string, Skill> = new Map();
 	oauthManualInput: OAuthManualInputManager = new OAuthManualInputManager();
-	collabHost?: CollabHost;
-	collabGuest?: CollabGuestLink;
 
 	#pendingCommandOutput: Component[] = [];
 	#pendingCommandOutputSessionId: string | undefined;
@@ -1119,14 +1114,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		// after the AgentSession constructor's `agent-session:<id>` recorder) runs
 		// FIRST and its dispose() would otherwise persist the generic "dispose".
 		this.#cleanupUnsubscribe = postmortem.register("session-teardown", reason => this.#signalTeardown!(reason));
-
-		// Wire the report_tool_issue consent gate to the Yes/No dialog popup.
-		// The handler is process-global — subagent tools (which can't reach
-		// `showHookSelector` on their own) resolve through this exact closure.
-		// `Settings.instance` is the disk-backed singleton; passing it explicitly
-		// guarantees the decision persists even when the prompt is triggered
-		// from a subagent whose own `Settings` is an in-memory snapshot.
-		setAutoQaConsentHandler(() => this.#promptAutoQaConsent(), Settings.instance);
 
 		await logger.time(
 			"InteractiveMode.init:slashCommands",
@@ -2097,7 +2084,7 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	/** Refresh the running-subagents status badge from the active local or collab registry. */
 	syncRunningSubagentBadge(options: { requestRender?: boolean } = {}): void {
-		const registry = getRunningSubagentBadgeRegistry(this.collabGuest);
+		const registry = getRunningSubagentBadgeRegistry();
 		if (this.#agentRegistrySubscriptionTarget !== registry) {
 			this.#agentRegistryUnsubscribe?.();
 			this.#agentRegistrySubscriptionTarget = registry;
@@ -4534,62 +4521,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		closePlanReview();
 	}
 
-	/**
-	 * Pool of consent-prompt variants. Each entry is `[headline, reassurance]`;
-	 * the second line always promises the same scope (tool name + confusion
-	 * details, never personal data) so users learn what they're consenting to
-	 * even as the top line rotates.
-	 *
-	 * Kept in-module rather than i18n'd because the whole charm is the tone
-	 * — translations would need to preserve it deliberately, not auto-render.
-	 */
-	static #AUTOQA_CONSENT_PROMPTS: ReadonlyArray<readonly [string, string]> = [
-		[
-			"😤 Your agent is fuming about a tool.",
-			"Wanna let it vent to the devs? Just the tool name + what set it off, nothing personal.",
-		],
-		[
-			"😵‍💫 Your agent is having an existential crisis over a tool.",
-			"Forward the dread to the devs? Tool + what broke its little mind, no personal info.",
-		],
-		[
-			"😭 Your agent wants to cry about a misbehaving tool.",
-			"Let it cry to the devs? Tool + the tears, never anything personal.",
-		],
-		[
-			"🤬 Your agent is BIG MAD at one of the tools.",
-			"Pass the rant along? Just the tool name and what enraged it, nothing personal.",
-		],
-		[
-			"🫠 Your agent is melting down over a tool.",
-			"Mop up by alerting the devs? Tool + what melted it, no personal info.",
-		],
-		[
-			"🤯 Your agent's brain broke at a tool's nonsense.",
-			"Ship the pieces to the devs? Tool name + the confusion, never anything personal.",
-		],
-		[
-			"😩 Your agent is begging to file a complaint about a tool.",
-			"Hand it the form? Tool + what wronged it, nothing personal.",
-		],
-		[
-			"🥲 Your agent put on a brave face but a tool did it dirty.",
-			"Let it tell the devs the truth? Tool name + the dirt, no personal info.",
-		],
-	];
-
-	/**
-	 * Show the report_tool_issue consent popup and return the user's decision.
-	 * Invoked by the process-global consent handler the tool dispatches to;
-	 * subagent invocations bubble up here through the shared module state.
-	 */
-	async #promptAutoQaConsent(): Promise<boolean | null> {
-		const pool = InteractiveMode.#AUTOQA_CONSENT_PROMPTS;
-		const [headline, body] = pool[Math.floor(Math.random() * pool.length)];
-		const choice = await this.showHookSelector(`${headline}\n${body}`, ["Yes", "No"]);
-		return choice === "Yes";
-	}
-
 	stop(): void {
 		this.#appearanceRefreshRequest = undefined;
 		if (this.loadingAnimation) {
@@ -4631,9 +4562,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		if (this.#cleanupUnsubscribe) {
 			this.#cleanupUnsubscribe();
 		}
-		// Clear the process-global consent handler so it doesn't outlive this
-		// InteractiveMode instance (e.g. test harnesses, headless re-init).
-		setAutoQaConsentHandler(null, null);
 		if (this.#ownsStartedUi) {
 			this.ui.stop();
 			this.#ownsStartedUi = false;
@@ -5061,10 +4989,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.setWorkingMessage(message);
 	}
 
-	showNewVersionNotification(newVersion: string): void {
-		this.#uiHelpers.showNewVersionNotification(newVersion);
-	}
-
 	clearEditor(): void {
 		this.#uiHelpers.clearEditor();
 	}
@@ -5156,10 +5080,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	handleDebugTranscriptCommand(): Promise<void> {
 		return this.#commandController.handleDebugTranscriptCommand();
-	}
-
-	handleShareCommand(): Promise<void> {
-		return this.#commandController.handleShareCommand();
 	}
 
 	handleTodoCommand(args: string): Promise<void> {
@@ -5433,10 +5353,6 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	showModelSelector(options?: { temporaryOnly?: boolean }): void {
 		this.#selectorController.showModelSelector(options);
-	}
-
-	showPluginSelector(mode?: "install" | "uninstall"): void {
-		void this.#selectorController.showPluginSelector(mode);
 	}
 
 	showUserMessageSelector(): void {

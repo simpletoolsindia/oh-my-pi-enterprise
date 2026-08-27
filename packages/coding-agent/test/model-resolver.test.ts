@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
-import { DEFAULT_MODEL_PER_PROVIDER } from "@oh-my-pi/pi-catalog/provider-models";
 import {
 	expandRoleAlias,
 	extractExplicitThinkingSelector,
@@ -364,16 +362,9 @@ function createOpusModel(provider: string, id: string, name: string): Model<"ant
 const allModels = [...mockModels, ...mockOpenRouterModels, ...mockProviderOverlapModels, ...mockCodexOverlapModels];
 
 describe("pickDefaultAvailableModel", () => {
-	test("prefers Codex OAuth over plain OpenAI for the shared GPT default", () => {
-		const result = pickDefaultAvailableModel(openaiGpt55Models);
-
-		expect(result?.provider).toBe("openai-codex");
-		expect(result?.id).toBe("gpt-5.5");
-	});
-
 	test("keeps earlier unrelated provider defaults ahead of shared Codex defaults", () => {
 		const anthropicDefault = buildModel({
-			id: DEFAULT_MODEL_PER_PROVIDER.anthropic,
+			id: "claude-opus-4-8",
 			name: "Anthropic Default",
 			api: "anthropic-messages",
 			provider: "anthropic",
@@ -392,7 +383,7 @@ describe("pickDefaultAvailableModel", () => {
 		const result = pickDefaultAvailableModel([anthropicDefault, ...openaiGpt55Models]);
 
 		expect(result?.provider).toBe("anthropic");
-		expect(result?.id).toBe(DEFAULT_MODEL_PER_PROVIDER.anthropic);
+		expect(result?.id).toBe("claude-opus-4-8");
 	});
 
 	test("uses the Zhipu Coding Plan login-validated model before newer z.ai defaults", () => {
@@ -437,17 +428,6 @@ describe("pickDefaultAvailableModel", () => {
 
 		expect(result?.provider).toBe("zhipu-coding-plan");
 		expect(result?.id).toBe("glm-5.1");
-	});
-
-	test("prefers SuperGrok over paid xAI when both defaults are present", () => {
-		const paid = getBundledModel("xai", DEFAULT_MODEL_PER_PROVIDER.xai);
-		const oauth = getBundledModel("xai-oauth", DEFAULT_MODEL_PER_PROVIDER["xai-oauth"]);
-		if (!paid || !oauth) {
-			throw new Error("Expected bundled xAI provider defaults");
-		}
-
-		expect(pickDefaultAvailableModel([paid, oauth])?.provider).toBe("xai-oauth");
-		expect(pickDefaultAvailableModel([paid])?.provider).toBe("xai");
 	});
 });
 

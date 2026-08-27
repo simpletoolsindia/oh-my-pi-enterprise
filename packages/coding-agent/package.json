@@ -239,14 +239,6 @@
       "types": "./src/edit/modes/*.ts",
       "import": "./src/edit/modes/*.ts"
     },
-    "./exa": {
-      "types": "./src/exa/index.ts",
-      "import": "./src/exa/index.ts"
-    },
-    "./exa/*": {
-      "types": "./src/exa/*.ts",
-      "import": "./src/exa/*.ts"
-    },
     "./exec/*": {
       "types": "./src/exec/*.ts",
       "import": "./src/exec/*.ts"
@@ -314,10 +306,6 @@
     "./extensibility/plugins/*": {
       "types": "./src/extensibility/plugins/*.ts",
       "import": "./src/extensibility/plugins/*.ts"
-    },
-    "./extensibility/plugins/marketplace": {
-      "types": "./src/extensibility/plugins/marketplace/index.ts",
-      "import": "./src/extensibility/plugins/marketplace/index.ts"
     },
     "./extensibility/plugins/marketplace/*": {
       "types": "./src/extensibility/plugins/marketplace/*.ts",
@@ -406,14 +394,6 @@
     "./memory-backend/*": {
       "types": "./src/memory-backend/*.ts",
       "import": "./src/memory-backend/*.ts"
-    },
-    "./hindsight": {
-      "types": "./src/hindsight/index.ts",
-      "import": "./src/hindsight/index.ts"
-    },
-    "./hindsight/*": {
-      "types": "./src/hindsight/*.ts",
-      "import": "./src/hindsight/*.ts"
     },
     "./modes": {
       "types": "./src/modes/index.ts",
@@ -563,18 +543,6 @@
     "./web/scrapers/*": {
       "types": "./src/web/scrapers/*.ts",
       "import": "./src/web/scrapers/*.ts"
-    },
-    "./web/search": {
-      "types": "./src/web/search/index.ts",
-      "import": "./src/web/search/index.ts"
-    },
-    "./web/search/*": {
-      "types": "./src/web/search/*.ts",
-      "import": "./src/web/search/*.ts"
-    },
-    "./web/search/providers/*": {
-      "types": "./src/web/search/providers/*.ts",
-      "import": "./src/web/search/providers/*.ts"
     },
     "./*.js": "./src/*.ts"
   }

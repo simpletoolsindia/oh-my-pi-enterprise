@@ -1841,35 +1841,6 @@ export class Settings {
 			delete raw.mnemosyne;
 		}
 
-		// hindsight: dynamicBankId/agentName -> scoping enum + bankId
-		// - dynamicBankId=true  → scoping="per-project" (closest semantic match;
-		//   the legacy `agent::project::channel::user` tuple was per-project in
-		//   practice — the channel/user env vars were rarely set).
-		// - hindsight.agentName was only used as the agent slot in the legacy
-		//   dynamic tuple; if the user customised it we surface it as the new
-		//   bankId base when no explicit bankId is set.
-		const hindsightObj = raw.hindsight as Record<string, unknown> | undefined;
-		if (hindsightObj) {
-			if ("dynamicBankId" in hindsightObj) {
-				if (!("scoping" in hindsightObj) && hindsightObj.dynamicBankId === true) {
-					hindsightObj.scoping = "per-project";
-				}
-				delete hindsightObj.dynamicBankId;
-			}
-			if ("agentName" in hindsightObj) {
-				const agentName = hindsightObj.agentName;
-				if (
-					!("bankId" in hindsightObj) &&
-					typeof agentName === "string" &&
-					agentName.trim().length > 0 &&
-					agentName !== "omp"
-				) {
-					hindsightObj.bankId = agentName;
-				}
-				delete hindsightObj.agentName;
-			}
-		}
-
 		// power.preventIdleSleep / power.preventSystemSleep / power.declareUserActive
 		// / power.preventDisplaySleep (four booleans) → power.sleepPrevention enum.
 		// The enum is cumulative: each level adds the flags of all lower levels.
@@ -2471,10 +2442,8 @@ class SettingSignal<A extends unknown[] = []> {
 
 	/**
 	 * Invoke every listener with `args`. Iterates a snapshot so a listener may
-	 * (un)subscribe mid-fire without re-entrancy — the Hindsight backend
-	 * re-registers the fresh state's listener on every rebuild — and wraps each
-	 * call so a throwing listener is logged and skipped instead of aborting the
-	 * rest.
+	 * (un)subscribe mid-fire without re-entrancy, and wraps each call so a
+	 * throwing listener is logged and skipped instead of aborting the rest.
 	 */
 	fire(...args: A): void {
 		for (const cb of [...this.#listeners]) {
@@ -2523,9 +2492,6 @@ const SETTING_HOOKS: Partial<Record<SettingPath, SettingHook<any>>> = {
 	"secrets.enabled": value => {
 		configureCredentialRedaction(value === true);
 	},
-	"hindsight.bankId": () => hindsightScopeSignal.fire(),
-	"hindsight.bankIdPrefix": () => hindsightScopeSignal.fire(),
-	"hindsight.scoping": () => hindsightScopeSignal.fire(),
 	extendedContext: () => extendedContextSignal.fire(),
 	"worktree.base": value => {
 		const dir = typeof value === "string" && value.trim() ? value : undefined;
@@ -2592,21 +2558,6 @@ const statusLineSessionAccentSignal = new SettingSignal("statusLine.sessionAccen
  * Returns an unsubscribe function. Callers should re-read settings in the callback.
  */
 export const onStatusLineSessionAccentChanged = (cb: () => void) => statusLineSessionAccentSignal.on(cb);
-
-/** Fires when any `hindsight.bankId` / `bankIdPrefix` / `scoping` value changes. */
-const hindsightScopeSignal = new SettingSignal("hindsight scope");
-
-/**
- * Subscribe to changes in the Hindsight bank-scoping settings. Lets the
- * Hindsight backend rebuild the active `HindsightSessionState` when the
- * operator switches `hindsight.bankId`, `hindsight.bankIdPrefix`, or
- * `hindsight.scoping` mid-session so subsequent retain/recall calls land in
- * the new bank instead of the one selected at session start.
- *
- * Returns an unsubscribe function. The callback receives no arguments — the
- * caller is expected to re-read the relevant settings via `Settings.get`.
- */
-export const onHindsightScopeChanged = (cb: () => void) => hindsightScopeSignal.on(cb);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Global Singleton

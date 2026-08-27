@@ -30,7 +30,6 @@ import { processFileArguments } from "./cli/file-processor";
 import { buildInitialMessage } from "./cli/initial-message";
 import { selectSession } from "./cli/session-picker";
 import { applyStartupCwd } from "./cli/startup-cwd";
-import { getLatestRelease } from "./cli/update-cli";
 import { findConfigFile } from "./config";
 import { ModelRegistry } from "./config/model-registry";
 import {
@@ -46,21 +45,16 @@ import { ModelsConfigFile } from "./config/models-config";
 import { serviceTierSettingToTier } from "./config/service-tier";
 import { getDefault, type SettingPath, Settings, type SettingValue, settings } from "./config/settings";
 import { initializeWithSettings } from "./discovery";
-import {
-	clearPluginRootsAndCaches,
-	injectPluginDirRoots,
-	preloadPluginRoots,
-	resolveActiveProjectRegistryPath,
-} from "./discovery/helpers";
+import { clearPluginRootsAndCaches, injectPluginDirRoots, preloadPluginRoots } from "./discovery/helpers";
 import { injectOmpExtensionCliRoots } from "./discovery/omp-extension-roots";
 import { formatExtensionLoadNotifications } from "./extensibility/extensions/load-errors";
 import { loadExtensions } from "./extensibility/extensions/loader";
 import { ExtensionRunner } from "./extensibility/extensions/runner";
 import type { ExtensionUIContext } from "./extensibility/extensions/types";
-import { scheduleMarketplaceAutoUpdate } from "./extensibility/plugins/marketplace-auto-update";
 import { registerDaemonProjectPresence } from "./launch/presence";
 import { discoverStartupLspServers } from "./lsp/servers";
 import type { MCPManager } from "./mcp";
+import { runCodegraphScanIfNeeded } from "./modes/components/codegraph-scan-overlay";
 import { InteractiveMode } from "./modes/interactive-mode";
 import type { PrintModeOptions } from "./modes/print-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
@@ -98,11 +92,9 @@ import {
 import type { ForeignSessionInfo, ForeignSessionSource, ForeignSessionStore } from "./session/foreign-session-store";
 import { resolveResumableSession, type SessionInfo } from "./session/session-listing";
 import { SessionManager } from "./session/session-manager";
-import { executeBuiltinSlashCommand } from "./slash-commands/builtin-registry";
 import { shouldShowStartupSplash } from "./startup-splash";
 import { discoverTitleSystemPromptFile, resolvePromptInput } from "./system-prompt";
 import { createPersistedSubagentReviverFactory } from "./task/persisted-revive";
-import { createTelemetryExportConfig, initTelemetryExport, isTelemetryExportEnabled } from "./telemetry-export";
 import { concreteThinkingLevel, parseConfiguredThinkingLevel } from "./thinking";
 import type { LspStartupServerInfo } from "./tools";
 import { getChangelogPath, resolveStartupChangelogForDisplay, type StartupChangelogSelection } from "./utils/changelog";
@@ -119,19 +111,6 @@ type RunRpcMode = (
 
 export function writeStartupNotice(parsedArgs: Pick<Args, "mode">, text: string): void {
 	(parsedArgs.mode === "json" ? process.stderr : process.stdout).write(text);
-}
-
-async function checkForNewVersion(currentVersion: string): Promise<string | undefined> {
-	if (!settings.get("startup.checkUpdate")) {
-		return;
-	}
-	try {
-		const channel = settings.get("update.channel");
-		const release = await getLatestRelease({ timeoutMs: 5_000, channel });
-		return Bun.semver.order(release.version, currentVersion) > 0 ? release.version : undefined;
-	} catch {
-		return undefined;
-	}
 }
 
 // Todo settings are caller-controlled in protocol modes. Do not host-default them:
@@ -482,7 +461,6 @@ async function runInteractiveMode(
 	version: string,
 	startupChangelog: StartupChangelogSelection | undefined,
 	notifs: (InteractiveModeNotify | null)[],
-	versionCheckPromise: Promise<string | undefined>,
 	initialMessages: string[],
 	setExtensionUIContext: (uiContext: ExtensionUIContext, hasUI: boolean) => void,
 	lspServers: LspStartupServerInfo[] | undefined,
@@ -493,7 +471,6 @@ async function runInteractiveMode(
 	eventBus?: EventBus,
 	initialMessage?: string,
 	initialImages?: ImageContent[],
-	joinLink?: string,
 	startBackgroundModelDiscovery?: () => Promise<void>,
 	startupLease?: ComposerLease,
 ): Promise<void> {
@@ -560,8 +537,7 @@ async function runInteractiveMode(
 		await setupWizard.runSetupWizard(mode, setupScenes);
 	}
 
-	// Consume failures immediately, but defer any banner until the transcript is stable.
-	const checkedVersionPromise = versionCheckPromise.catch(() => undefined);
+	await runCodegraphScanIfNeeded(mode, session.sessionManager.getCwd(), settings.get("codegraph.enabled"));
 
 	// `init` already cleared native history before painting the startup frame.
 	// The normal replay offers resumed transcript rows to the frame provider and
@@ -571,16 +547,6 @@ async function runInteractiveMode(
 	await logger.time("InteractiveMode.renderInitialMessages", () =>
 		mode.renderInitialMessages({ preserveExistingChat: true }),
 	);
-	// A resolved version check must not insert its banner into a partial transcript.
-	checkedVersionPromise.then(newVersion => {
-		if (!settings.get("startup.checkUpdate")) {
-			return;
-		}
-		if (newVersion) {
-			mode.showNewVersionNotification(newVersion);
-		}
-	});
-
 	for (const notify of notifs) {
 		if (!notify) {
 			continue;
@@ -592,12 +558,6 @@ async function runInteractiveMode(
 		} else if (notify.kind === "info") {
 			mode.showStatus(notify.message);
 		}
-	}
-
-	// `omp join <link>`: dispatch through the same builtin path as a typed
-	// `/join` so collab guards and error rendering stay in one place.
-	if (joinLink !== undefined) {
-		await executeBuiltinSlashCommand(`/join ${joinLink}`, { ctx: mode });
 	}
 
 	if (initialMessage !== undefined) {
@@ -1729,12 +1689,6 @@ export async function runRootCommand(
 			await logger.time("registerDaemonProjectPresence", registerDaemonProjectPresence, cwd);
 		}
 
-		scheduleMarketplaceAutoUpdate({
-			autoUpdate: settingsInstance.get("marketplace.autoUpdate"),
-			resolveActiveProjectRegistryPath,
-			clearPluginRootsCache: clearPluginRootsAndCaches,
-		});
-
 		const sessionOptions = await logger.time(
 			"buildSessionOptions",
 			buildSessionOptions,
@@ -1748,15 +1702,6 @@ export async function runRootCommand(
 		sessionOptions.modelRegistry = modelRegistry;
 		sessionOptions.hasUI = isInteractive || mode === "rpc-ui";
 		sessionOptions.settings = settingsInstance;
-
-		// OTEL: register global OTLP exporters when an endpoint is configured via
-		// env, then switch on the agent loop's telemetry hooks so traces, run-level
-		// metrics, and structured logs have source events to export. Content capture
-		// remains governed by OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT.
-		await logger.time("initTelemetryExport", initTelemetryExport);
-		if (isTelemetryExportEnabled()) {
-			sessionOptions.telemetry = createTelemetryExportConfig(sessionOptions.telemetry);
-		}
 
 		// Handle CLI --api-key as runtime override (not persisted)
 		if (parsedArgs.apiKey) {
@@ -1963,7 +1908,6 @@ export async function runRootCommand(
 				stopStartupWatchdog();
 				await runRpcMode(session, mode === "rpc-ui" ? setToolUIContext : undefined, eventBus, rpcInput);
 			} else if (isInteractive) {
-				const versionCheckPromise = checkForNewVersion(VERSION).catch(() => undefined);
 				const startupChangelog = await startupChangelogPromise;
 
 				const modelScopeNotification = buildModelScopeNotification(
@@ -1992,7 +1936,6 @@ export async function runRootCommand(
 						VERSION,
 						startupChangelog,
 						notifs,
-						versionCheckPromise,
 						initialArgs.messages,
 						setToolUIContext,
 						lspServers,
@@ -2003,7 +1946,6 @@ export async function runRootCommand(
 						eventBus,
 						initialMessage,
 						initialImages,
-						parsedArgs.join,
 						startBackgroundModelDiscovery,
 						startupLease,
 					);

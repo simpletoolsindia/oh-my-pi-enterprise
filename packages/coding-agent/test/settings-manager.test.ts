@@ -19,7 +19,6 @@ import {
 import * as discovery from "@oh-my-pi/pi-coding-agent/discovery";
 import { AgentStorage } from "@oh-my-pi/pi-coding-agent/session/agent-storage";
 import { AUTO_IMAGE_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/tools/image-providers";
-import { SEARCH_PROVIDER_ORDER } from "@oh-my-pi/pi-coding-agent/web/search/types";
 import { getProjectAgentDir, TempDir } from "@oh-my-pi/pi-utils";
 import * as fileLock from "@oh-my-pi/pi-utils/file-lock";
 import { YAML } from "bun";
@@ -1000,33 +999,6 @@ describe("Settings", () => {
 	});
 
 	describe("provider preference migration", () => {
-		it("expands a legacy providers.webSearch choice into the head of webSearchOrder", async () => {
-			await writeSettings({ providers: { webSearch: "exa" } });
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("providers.webSearchOrder")).toEqual([
-				"exa",
-				...SEARCH_PROVIDER_ORDER.filter(id => id !== "exa"),
-			]);
-		});
-
-		it("drops legacy providers.webSearch auto without seeding an order", async () => {
-			await writeSettings({ providers: { webSearch: "auto" } });
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("providers.webSearchOrder")).toEqual([]);
-		});
-
-		it("keeps an explicit webSearchOrder over the legacy webSearch preference", async () => {
-			await writeSettings({ providers: { webSearch: "exa", webSearchOrder: ["gemini"] } });
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("providers.webSearchOrder")).toEqual(["gemini"]);
-		});
-
 		it("expands a legacy providers.image choice into the head of imageOrder", async () => {
 			await writeSettings({ providers: { image: "xai" } });
 
@@ -1059,7 +1031,7 @@ describe("Settings", () => {
 		});
 	});
 	describe("migrations", () => {
-		it("consolidates legacy Exa suite toggles onto exa.enabled", async () => {
+		it("drops legacy Exa settings entirely (Exa provider removed)", async () => {
 			await writeSettings({
 				exa: {
 					enabled: true,
@@ -1071,32 +1043,6 @@ describe("Settings", () => {
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect(settings.get("exa.enabled")).toBe(false);
-			settings.set("display.showTokenUsage", true);
-			await settings.flush();
-			expect((await readSettings()).exa).toEqual({ enabled: false });
-		});
-
-		it("migrates quoted dotted Exa toggles and removes obsolete suite settings", async () => {
-			await Bun.write(
-				getConfigPath(),
-				`"exa.enabled": true\n"exa.enableSearch": false\n"exa.enableResearcher": true\n"exa.enableWebsets": true\n`,
-			);
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("exa.enabled")).toBe(false);
-			settings.set("display.showTokenUsage", true);
-			await settings.flush();
-			expect((await readSettings()).exa).toEqual({ enabled: false });
-		});
-
-		it("removes the legacy Exa block when it contains only retired suite toggles", async () => {
-			await writeSettings({ exa: { enableResearcher: true, enableWebsets: true } });
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("exa.enabled")).toBe(true);
 			settings.set("display.showTokenUsage", true);
 			await settings.flush();
 			expect((await readSettings()).exa).toBeUndefined();
@@ -1129,36 +1075,6 @@ describe("Settings", () => {
 			expect(settings.get("edit.mode")).toBe("hashline");
 			expect(settings.getEditVariantForModel("claude-opus-4-5")).toBe("hashline");
 			expect(settings.getEditVariantForModel("gpt-5.2")).toBe("apply_patch");
-		});
-
-		it("maps legacy hindsight.dynamicBankId=true onto hindsight.scoping=per-project", async () => {
-			await writeSettings({
-				hindsight: { dynamicBankId: true },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("hindsight.scoping")).toBe("per-project");
-		});
-
-		it("does not override an explicit hindsight.scoping when migrating", async () => {
-			await writeSettings({
-				hindsight: { dynamicBankId: true, scoping: "global" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("hindsight.scoping")).toBe("global");
-		});
-
-		it("promotes legacy hindsight.agentName onto hindsight.bankId when bankId is unset", async () => {
-			await writeSettings({
-				hindsight: { agentName: "ada-cli" },
-			});
-
-			const settings = await Settings.init({ cwd: projectDir, agentDir });
-
-			expect(settings.get("hindsight.bankId")).toBe("ada-cli");
 		});
 
 		it("migrates the legacy mnemosyne memory backend to mnemopi", async () => {
@@ -1333,79 +1249,53 @@ describe("Settings", () => {
 			expect(settings.get("grep.enabled")).toBe(true);
 		});
 
-		it("migrates nested dev.autoqa.consent and todo.reminders.max without configuring parents", async () => {
+		it("migrates nested todo.reminders.max without configuring the parent", async () => {
 			await writeSettings({
-				dev: { autoqa: { consent: "granted" } },
 				todo: { reminders: { max: 5 } },
 			});
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect(settings.get("dev.autoqaConsent")).toBe("granted");
-			expect(settings.get("dev.autoqa")).toBe(true);
-			expect(settings.isConfigured("dev.autoqa")).toBe(false);
 			expect(settings.get("todo.remindersMax")).toBe(5);
 			expect(settings.get("todo.reminders")).toBe(true);
 			expect(settings.isConfigured("todo.reminders")).toBe(false);
 		});
 
-		it("migrates quoted dotted legacy keys for consent and reminders max", async () => {
-			await Bun.write(getConfigPath(), `"dev.autoqa.consent": denied\n"todo.reminders.max": 2\n`);
+		it("migrates quoted dotted legacy key for reminders max", async () => {
+			await Bun.write(getConfigPath(), `"todo.reminders.max": 2\n`);
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect(settings.get("dev.autoqaConsent")).toBe("denied");
-			expect(settings.isConfigured("dev.autoqa")).toBe(false);
 			expect(settings.get("todo.remindersMax")).toBe(2);
 			expect(settings.get("todo.reminders")).toBe(true);
 		});
 
-		it("lets explicit new keys win over legacy nested consent/max values", async () => {
+		it("lets an explicit new key win over a legacy nested max value", async () => {
 			await writeSettings({
-				dev: { autoqa: { consent: "denied" }, autoqaConsent: "granted" },
 				todo: { reminders: { max: 1 }, remindersMax: 9 },
 			});
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect(settings.get("dev.autoqaConsent")).toBe("granted");
-			expect(settings.isConfigured("dev.autoqa")).toBe(false);
 			expect(settings.get("todo.remindersMax")).toBe(9);
 			expect(settings.get("todo.reminders")).toBe(true);
 		});
 
-		it("preserves recoverable parent booleans alongside legacy leaf keys", async () => {
-			await Bun.write(
-				getConfigPath(),
-				`dev:\n  autoqa: true\n"dev.autoqa.consent": unset\ntodo:\n  reminders: false\n"todo.reminders.max": 4\n`,
-			);
+		it("preserves a recoverable parent boolean alongside a legacy leaf key", async () => {
+			await Bun.write(getConfigPath(), `todo:\n  reminders: false\n"todo.reminders.max": 4\n`);
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
 
-			expect(settings.get("dev.autoqa")).toBe(true);
-			expect(settings.get("dev.autoqaConsent")).toBe("unset");
 			expect(settings.get("todo.reminders")).toBe(false);
 			expect(settings.get("todo.remindersMax")).toBe(4);
 		});
 
-		it("migrates denied/granted/unset consent values through isolated overrides", () => {
-			for (const consent of ["denied", "granted", "unset"] as const) {
-				const settings = Settings.isolated({
-					"dev.autoqa.consent": consent,
-				} as Partial<Record<SettingPath, unknown>>);
-				expect(settings.get("dev.autoqaConsent")).toBe(consent);
-				expect(settings.isConfigured("dev.autoqa")).toBe(false);
-			}
-		});
-
-		it("persists migrated consent/max keys and drops legacy nested parents on save", async () => {
+		it("persists migrated max key and drops legacy nested parent on save", async () => {
 			await writeSettings({
-				dev: { autoqa: { consent: "denied" } },
 				todo: { reminders: { max: 1 } },
 			});
 
 			const settings = await Settings.init({ cwd: projectDir, agentDir });
-			expect(settings.get("dev.autoqaConsent")).toBe("denied");
 			expect(settings.get("todo.remindersMax")).toBe(1);
 
 			// Touch an unrelated key so the migrated tree is written back.
@@ -1413,18 +1303,12 @@ describe("Settings", () => {
 			await settings.flush();
 
 			const onDisk = await readSettings();
-			const dev = onDisk.dev as Record<string, unknown>;
 			const todo = onDisk.todo as Record<string, unknown>;
-			expect(dev.autoqaConsent).toBe("denied");
-			expect(dev.autoqa).toBeUndefined();
 			expect(todo.remindersMax).toBe(1);
 			expect(todo.reminders).toBeUndefined();
-			expect(onDisk["dev.autoqa.consent"]).toBeUndefined();
 			expect(onDisk["todo.reminders.max"]).toBeUndefined();
 
 			const reloaded = await Settings.loadIsolated({ cwd: projectDir, agentDir });
-			expect(reloaded.get("dev.autoqaConsent")).toBe("denied");
-			expect(reloaded.isConfigured("dev.autoqa")).toBe(false);
 			expect(reloaded.get("todo.remindersMax")).toBe(1);
 			expect(reloaded.get("todo.reminders")).toBe(true);
 		});

@@ -4,7 +4,6 @@ import { getStreamingPartialJson } from "@oh-my-pi/pi-ai/utils/block-symbols";
 import { type Component, Spacer, Text, TruncatedText } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { AdvisorMessageDetails } from "../../advisor";
-import { COLLAB_PROMPT_MESSAGE_TYPE, type CollabPromptDetails } from "../../collab/protocol";
 import { settings } from "../../config/settings";
 import { getEditClipboard } from "../../edit/edit-clipboard";
 import { getFileSnapshotStore } from "../../edit/file-snapshot-store";
@@ -13,14 +12,12 @@ import { AssistantMessageComponent } from "../../modes/components/assistant-mess
 import { createBackgroundTanDispatchBlock } from "../../modes/components/background-tan-message";
 import { BashExecutionComponent } from "../../modes/components/bash-execution";
 import { detectCacheInvalidation } from "../../modes/components/cache-invalidation-marker";
-import { CollabPromptMessageComponent } from "../../modes/components/collab-prompt-message";
 import {
 	BranchSummaryMessageComponent,
 	CompactionSummaryMessageComponent,
 	createHandoffSummaryMessageComponent,
 } from "../../modes/components/compaction-summary-message";
 import { CustomMessageComponent } from "../../modes/components/custom-message";
-import { DynamicBorder } from "../../modes/components/dynamic-border";
 import { EvalExecutionComponent } from "../../modes/components/eval-execution";
 import {
 	type LateDiagnosticsFile,
@@ -35,7 +32,7 @@ import { SkillMessageComponent } from "../../modes/components/skill-message";
 import { StrippedToolCallsPlaceholder } from "../../modes/components/stripped-tool-calls-placeholder";
 import { ToolActivityContainer } from "../../modes/components/tool-activity";
 import { ToolExecutionComponent, type ToolExecutionHandle } from "../../modes/components/tool-execution";
-import { TranscriptBlock, TranscriptContainer } from "../../modes/components/transcript-container";
+import { TranscriptContainer } from "../../modes/components/transcript-container";
 import { createUsageRowBlock } from "../../modes/components/usage-row";
 import { UserMessageComponent } from "../../modes/components/user-message";
 import { decodeStreamedToolArgs, streamingStringKeysForTool } from "../../modes/controllers/tool-args-reveal";
@@ -200,11 +197,6 @@ export class UiHelpers {
 					}
 					if (message.customType === LAUNCH_COMPLETION_MESSAGE_TYPE) {
 						this.ctx.chatContainer.addChild(buildLaunchCompletionBlock(message));
-						break;
-					}
-					if (message.customType === COLLAB_PROMPT_MESSAGE_TYPE) {
-						const component = new CollabPromptMessageComponent(message as CustomMessage<CollabPromptDetails>);
-						this.ctx.chatContainer.addChild(component);
 						break;
 					}
 					if (message.customType === SKILL_PROMPT_MESSAGE_TYPE) {
@@ -950,22 +942,6 @@ export class UiHelpers {
 		const text = new Text(`Warning: ${warningMessage}`, 1, 0).setStyleFn(t => theme.fg("warning", t));
 		const content = [new Spacer(1), text];
 		this.ctx.present(options?.hideWithToolActivity ? new ToolActivityContainer(content) : content);
-	}
-
-	showNewVersionNotification(newVersion: string): void {
-		const block = new TranscriptBlock();
-		block.addChild(new DynamicBorder(text => theme.fg("warning", text)));
-		const title = "Update Available";
-		const prefix = `New version ${newVersion} is available. Run: `;
-		const command = "omp update";
-		block.addChild(
-			new Text(`${title}\n${prefix}${command}`, 1, 0).setStyleFn(
-				() =>
-					`${theme.bold(theme.fg("warning", title))}\n${theme.fg("muted", prefix)}${theme.fg("accent", command)}`,
-			),
-		);
-		block.addChild(new DynamicBorder(text => theme.fg("warning", text)));
-		this.ctx.present(block);
 	}
 
 	updatePendingMessagesDisplay(): void {

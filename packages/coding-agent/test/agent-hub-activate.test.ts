@@ -104,6 +104,7 @@ describe("Agent hub Enter activation", () => {
 
 	afterEach(() => {
 		resetSettingsForTest();
+		AgentRegistry.resetGlobalForTests();
 	});
 
 	it("Enter focuses the selected agent and closes the hub", async () => {
@@ -324,7 +325,7 @@ describe("Agent hub Enter activation", () => {
 					id: "model",
 					parentId: null,
 					timestamp: createdAt,
-					model: "openai-codex/gpt-5.6-luna",
+					model: "custom/gpt-5.6-luna",
 					// Historical concrete overrides did not persist a model-role field.
 				}),
 				JSON.stringify({
@@ -488,7 +489,11 @@ describe("Agent hub Enter activation", () => {
 	});
 
 	it("selector controller restores focus to the editor after Enter focuses an agent", async () => {
-		const agents = new AgentRegistry();
+		// `showAgentHub` always reads `AgentRegistry.global()` (there is no
+		// injectable-registry pathway through `SelectorController` — that used to
+		// exist for the now-removed collab-guest feature); register directly into
+		// the global singleton to match, and reset it in afterEach.
+		const agents = AgentRegistry.global();
 		agents.register({
 			id: AGENT_ID,
 			displayName: AGENT_ID,
@@ -525,7 +530,6 @@ describe("Agent hub Enter activation", () => {
 			},
 			editor,
 			editorContainer,
-			collabGuest: { agentRegistry: agents, hubRemote: undefined },
 			focusAgentSession: async (id: string) => {
 				focusedIds.push(id);
 				focusResolved.resolve();
@@ -557,9 +561,15 @@ describe("Agent hub double-← gating", () => {
 
 	afterEach(() => {
 		resetSettingsForTest();
+		AgentRegistry.resetGlobalForTests();
 	});
 
-	function setup(agents: AgentRegistry, sessionFile: string | null = null) {
+	// `showAgentHub` always reads `AgentRegistry.global()` (there is no
+	// injectable-registry pathway through `SelectorController` — that used to
+	// exist for the now-removed collab-guest feature); callers register agents
+	// directly into `AgentRegistry.global()` before calling `setup()`, and
+	// `afterEach` resets it.
+	function setup(sessionFile: string | null = null) {
 		let shown: AgentHubOverlayComponent | undefined;
 		let overlayOptions: Record<string, unknown> | undefined;
 		const shownReady = Promise.withResolvers<AgentHubOverlayComponent>();
@@ -585,7 +595,6 @@ describe("Agent hub double-← gating", () => {
 				clear: () => {},
 				addChild: () => {},
 			},
-			collabGuest: { agentRegistry: agents, hubRemote: undefined },
 			focusAgentSession: async () => {},
 			session: { getToolByName: () => undefined, extensionRunner: undefined },
 			sessionManager: { getCwd: () => TEST_CWD, getSessionFile: () => sessionFile },
@@ -615,7 +624,7 @@ describe("Agent hub double-← gating", () => {
 	}
 
 	it("requireContent keeps the hub closed when only Main is registered", () => {
-		const agents = new AgentRegistry();
+		const agents = AgentRegistry.global();
 		agents.register({
 			id: "Main",
 			displayName: "Main",
@@ -624,7 +633,7 @@ describe("Agent hub double-← gating", () => {
 			sessionFile: null,
 			status: "running",
 		});
-		const { controller, shown } = setup(agents);
+		const { controller, shown } = setup();
 
 		controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true });
 
@@ -632,9 +641,9 @@ describe("Agent hub double-← gating", () => {
 	});
 
 	it("requireContent opens the hub once a subagent exists", () => {
-		const agents = new AgentRegistry();
+		const agents = AgentRegistry.global();
 		registerWorker(agents);
-		const { controller, shown } = setup(agents);
+		const { controller, shown } = setup();
 
 		controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true });
 
@@ -648,8 +657,8 @@ describe("Agent hub double-← gating", () => {
 		const workerSessionFile = path.join(tempDir.path(), "main", "Worker.jsonl");
 		await Bun.write(sessionFile, "");
 		await Bun.write(workerSessionFile, persistedChildJsonl("worker"));
-		const agents = new AgentRegistry();
-		const { controller, shown, shownReady } = setup(agents, sessionFile);
+		const agents = AgentRegistry.global();
+		const { controller, shown, shownReady } = setup(sessionFile);
 
 		controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true });
 
@@ -664,8 +673,8 @@ describe("Agent hub double-← gating", () => {
 		const sessionFile = path.join(tempDir.path(), "main.jsonl");
 		await Bun.write(sessionFile, "");
 		await Bun.write(path.join(tempDir.path(), "main", "Worker.jsonl"), persistedChildJsonl("worker"));
-		const agents = new AgentRegistry();
-		const { controller, shown, overlayOptions } = setup(agents, sessionFile);
+		const agents = AgentRegistry.global();
+		const { controller, shown, overlayOptions } = setup(sessionFile);
 
 		controller.showAgentHub(new SessionObserverRegistry());
 
@@ -680,7 +689,7 @@ describe("Agent hub double-← gating", () => {
 	});
 
 	it("armCloseTap lets a single ← dismiss the hub the opening ←← raised", () => {
-		const agents = new AgentRegistry();
+		const agents = AgentRegistry.global();
 		// A parked/persisted agent opens the hub under requireContent (issue #4780).
 		agents.register({
 			id: "Parked",
@@ -691,7 +700,7 @@ describe("Agent hub double-← gating", () => {
 			sessionFile: null,
 			status: "parked",
 		});
-		const { controller, editor, shown, focusTargets } = setup(agents);
+		const { controller, editor, shown, focusTargets } = setup();
 
 		controller.showAgentHub(new SessionObserverRegistry(), { requireContent: true, armCloseTap: true });
 

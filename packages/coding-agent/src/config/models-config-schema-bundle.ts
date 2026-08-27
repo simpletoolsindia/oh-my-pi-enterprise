@@ -266,7 +266,7 @@ export const getModelsConfigSchemaBundle = once(() => {
 	});
 
 	const ProviderDiscoverySchema = type({
-		type: '"ollama" | "llama.cpp" | "lm-studio" | "openai-models-list" | "proxy" | "litellm"',
+		type: '"openai-models-list" | "proxy"',
 		"timeoutMs?": "number",
 	}).narrow((value, ctx) => {
 		if (

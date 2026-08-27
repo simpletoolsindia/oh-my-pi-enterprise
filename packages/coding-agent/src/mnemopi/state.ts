@@ -5,6 +5,9 @@ import type { Mnemopi, RecallResult } from "@oh-my-pi/pi-mnemopi";
 import type * as MnemopiCoreNs from "@oh-my-pi/pi-mnemopi/core";
 import type { LocalModelInitializer } from "@oh-my-pi/pi-mnemopi/core";
 import { logger, toError } from "@oh-my-pi/pi-utils";
+import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
+import type { MnemopiBackendConfig, MnemopiScoping } from "./config";
+import { mnemopiEmbedClient } from "./embed-client";
 import {
 	composeRecallQuery,
 	formatCurrentTime,
@@ -13,11 +16,8 @@ import {
 	prepareUserRetentionTranscript,
 	stripRetentionProtocolMarkers,
 	truncateRecallQuery,
-} from "../hindsight/content";
-import { extractMessages } from "../hindsight/transcript";
-import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
-import type { MnemopiBackendConfig, MnemopiScoping } from "./config";
-import { mnemopiEmbedClient } from "./embed-client";
+} from "./transcript-content";
+import { extractMessages } from "./transcript-extract";
 
 // The mnemopi package pulls the embeddings stack; keep it off the CLI startup
 // module graph by loading it lazily at the async boundaries that need it.

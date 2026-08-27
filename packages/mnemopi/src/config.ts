@@ -274,9 +274,9 @@ export interface RecallFeatureFlags {
 	proactiveLinking?: boolean;
 }
 
-let polyphonicRecallDefault = false;
-let enhancedRecallDefault = false;
-let proactiveLinkingDefault = false;
+let polyphonicRecallDefault = true;
+let enhancedRecallDefault = true;
+let proactiveLinkingDefault = true;
 
 /**
  * Sets process-wide defaults for the env-gated recall features. Host configuration

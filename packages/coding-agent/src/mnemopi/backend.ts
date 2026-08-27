@@ -1,7 +1,6 @@
 import { rm } from "node:fs/promises";
 import * as path from "node:path";
-import { type ApiKeyResolver, completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
-import { hostMatchesUrl } from "@oh-my-pi/pi-catalog/hosts";
+import { completeSimple, retryTransientCompletion } from "@oh-my-pi/pi-ai";
 import type { Mnemopi } from "@oh-my-pi/pi-mnemopi";
 import type { MnemopiLlmCompleteOptions } from "@oh-my-pi/pi-mnemopi/core/runtime-options";
 import type * as MnemopiDiagnoseNs from "@oh-my-pi/pi-mnemopi/diagnose";
@@ -482,25 +481,6 @@ async function loadMnemopiConfigWithProviders(
 	return config;
 }
 
-/**
- * When mnemopi targets OpenRouter (its default embedding host) without a
- * user-pinned key, hand it the central {@link ApiKeyResolver} so requests pick
- * up AuthStorage credentials, force-refresh on 401, and rotate across sibling
- * keys. Returns undefined when the URL points elsewhere or when no OpenRouter
- * credential exists, preserving mnemopi's env-key fallback and its
- * "no key -> API embeddings unavailable" gating.
- */
-async function openrouterKeyResolver(
-	modelRegistry: ModelRegistry,
-	sessionId: string,
-	baseUrl: string | undefined,
-): Promise<ApiKeyResolver | undefined> {
-	if (baseUrl !== undefined && !hostMatchesUrl(baseUrl, "openrouter")) return undefined;
-	const key = await modelRegistry.getApiKeyForProvider("openrouter", sessionId);
-	if (key === undefined || key === "") return undefined;
-	return modelRegistry.resolver("openrouter", { sessionId });
-}
-
 async function resolveMnemopiProviderOptions(
 	config: MnemopiBackendConfig,
 	settings: MemoryBackendStartOptions["settings"],
@@ -511,15 +491,13 @@ async function resolveMnemopiProviderOptions(
 		noEmbeddings: config.providerOptions.noEmbeddings,
 		embeddingModel: config.providerOptions.embeddingModel,
 		embeddingApiUrl: config.providerOptions.embeddingApiUrl,
-		embeddingApiKey:
-			config.providerOptions.embeddingApiKey ??
-			(await openrouterKeyResolver(modelRegistry, sessionId, config.providerOptions.embeddingApiUrl)),
+		embeddingApiKey: config.providerOptions.embeddingApiKey,
 		llm: false,
 	};
 
 	if (config.llmMode === "none") return base;
 
-	// A local on-device memory model (providers.memoryModel) overrides the smol/remote
+	// A local on-device memory model (providers.memoryModel) overrides the smol
 	// LLM for both consolidation and the configured extraction path. `none` still wins
 	// (the user explicitly disabled the LLM). The refined prompts feed the small local
 	// model the line-format extraction + hardened consolidation recipes from the spike.
@@ -539,20 +517,6 @@ async function resolveMnemopiProviderOptions(
 				// instructions as a system turn for every extraction call, so anything
 				// rendered here would be built in code and then discarded.
 				consolidationPrompt: memoryConsolidationPrompt,
-			},
-		};
-	}
-	if (config.llmMode === "remote") {
-		return {
-			...base,
-			llm: {
-				baseUrl: config.llmBaseUrl,
-				apiKey:
-					config.llmApiKey ??
-					(config.llmBaseUrl === undefined
-						? undefined
-						: await openrouterKeyResolver(modelRegistry, sessionId, config.llmBaseUrl)),
-				model: config.llmModel,
 			},
 		};
 	}

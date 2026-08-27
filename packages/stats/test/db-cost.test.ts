@@ -157,7 +157,11 @@ describe("stats subscription cost correction", () => {
 	it("marks subscription-only SuperGrok usage as unpriced", async () => {
 		await initDb();
 		const stats = createXaiOAuthStats("xai-unpriced");
-		stats.model = "grok-composer-2.5-fast";
+		// Deliberately not a real catalog entry: every bundled xai-oauth model
+		// currently carries real per-token overage pricing, so a genuine model
+		// id would compute a nonzero cost instead of exercising the "no catalog
+		// pricing found" fallback this test targets.
+		stats.model = "grok-not-yet-in-catalog";
 
 		insertMessageStats([stats]);
 

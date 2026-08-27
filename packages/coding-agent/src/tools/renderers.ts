@@ -10,7 +10,6 @@ import { goalToolRenderer } from "../goals/tools/goal-tool";
 import { lspToolRenderer } from "../lsp/render";
 import type { Theme } from "../modes/theme/theme";
 import { taskToolRenderer } from "../task/renderer";
-import { webSearchToolRenderer } from "../web/search/render";
 import { askToolRenderer } from "./ask";
 import { astEditToolRenderer } from "./ast-edit";
 import { astGrepToolRenderer } from "./ast-grep";
@@ -137,7 +136,6 @@ export const toolRenderers: Record<string, ToolRenderer> = {
 	todo: todoToolRenderer as ToolRenderer,
 	github: githubToolRenderer as ToolRenderer,
 	goal: goalToolRenderer as ToolRenderer,
-	web_search: webSearchToolRenderer as ToolRenderer,
 	vibe_spawn: createVibeToolRenderer("spawn") as ToolRenderer,
 	vibe_send: createVibeToolRenderer("send") as ToolRenderer,
 	vibe_wait: createVibeToolRenderer("wait") as ToolRenderer,

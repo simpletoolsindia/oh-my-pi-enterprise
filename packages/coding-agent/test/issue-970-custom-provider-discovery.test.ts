@@ -284,40 +284,6 @@ describe("issue #970 custom provider discovery", () => {
 		expect(registry.find("vllm-fast", "Stale")).toBeUndefined();
 	});
 
-	test("uses default vllm baseUrl override for built-in discovery", async () => {
-		fs.writeFileSync(
-			modelsPath,
-			["providers:", "  vllm:", "    baseUrl: http://192.168.5.3:8085/v1", "    auth: none"].join("\n"),
-		);
-
-		await authStorage.set("vllm", { type: "api_key", key: "vllm-local" });
-
-		const fetchMock: (input: string | URL | Request, init?: RequestInit) => Promise<Response> = async (
-			input,
-			init,
-		) => {
-			const url = String(input);
-			if (url !== "http://192.168.5.3:8085/v1/models") {
-				throw new Error(`Unexpected URL: ${url}`);
-			}
-			const headers = init?.headers as Headers | Record<string, string> | undefined;
-			const authHeader = headers instanceof Headers ? headers.get("Authorization") : headers?.Authorization;
-			expect(authHeader).toBeUndefined();
-			expect(init?.signal).toBeInstanceOf(AbortSignal);
-			return new Response(JSON.stringify({ data: [{ id: "DeepSeek-V4-Flash", max_model_len: 262_144 }] }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		};
-
-		const registry = new ModelRegistryImpl(authStorage, modelsPath, { fetch: fetchMock });
-		await registry.refreshProvider("vllm");
-
-		const model = registry.find("vllm", "DeepSeek-V4-Flash");
-		expect(model?.baseUrl).toBe("http://192.168.5.3:8085/v1");
-		expect(model?.contextWindow).toBe(262_144);
-		expect(model?.provider).toBe("vllm");
-	});
 	test("does not probe built-in vllm unless it is explicitly configured", async () => {
 		fs.writeFileSync(modelsPath, ["providers: {}"].join("\n"));
 
@@ -338,99 +304,6 @@ describe("issue #970 custom provider discovery", () => {
 		await registry.refresh();
 
 		expect(urls).not.toContain("http://127.0.0.1:8000/v1/models");
-	});
-
-	test("treats auth none only vllm config as explicit built-in discovery", async () => {
-		fs.writeFileSync(modelsPath, ["providers:", "  vllm:", "    auth: none"].join("\n"));
-
-		const fetchMock: (input: string | URL | Request, init?: RequestInit) => Promise<Response> = async (
-			input,
-			init,
-		) => {
-			const url = String(input);
-			if (url !== "http://127.0.0.1:8000/v1/models") {
-				throw new Error(`Unexpected URL: ${url}`);
-			}
-			expect(init?.signal).toBeInstanceOf(AbortSignal);
-			return new Response(JSON.stringify({ data: [{ id: "DefaultVllm", max_model_len: 262_144 }] }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		};
-
-		const registry = new ModelRegistryImpl(authStorage, modelsPath, { fetch: fetchMock });
-		await registry.refreshProvider("vllm");
-
-		expect(registry.find("vllm", "DefaultVllm")?.contextWindow).toBe(262_144);
-	});
-
-	test("refetches built-in vllm discovery when the configured baseUrl changes", async () => {
-		fs.writeFileSync(
-			modelsPath,
-			["providers:", "  vllm:", "    baseUrl: http://192.168.5.3:8085/v1", "    auth: none"].join("\n"),
-		);
-
-		const calls: string[] = [];
-		const fetchMock: (input: string | URL | Request) => Promise<Response> = async input => {
-			const url = String(input);
-			if (url === "http://192.168.5.3:8085/v1/models") {
-				calls.push(url);
-				return new Response(JSON.stringify({ data: [{ id: "Old", max_model_len: 262_144 }] }), {
-					status: 200,
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			if (url === "http://192.168.5.4:8085/v1/models") {
-				calls.push(url);
-				return new Response(JSON.stringify({ data: [{ id: "New", max_model_len: 524_288 }] }), {
-					status: 200,
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			throw new Error(`Unexpected URL: ${url}`);
-		};
-
-		const firstRegistry = new ModelRegistryImpl(authStorage, modelsPath, { fetch: fetchMock });
-		await firstRegistry.refreshProvider("vllm");
-		expect(firstRegistry.find("vllm", "Old")?.contextWindow).toBe(262_144);
-
-		fs.writeFileSync(
-			modelsPath,
-			["providers:", "  vllm:", "    baseUrl: http://192.168.5.4:8085/v1", "    auth: none"].join("\n"),
-		);
-		const secondRegistry = new ModelRegistryImpl(authStorage, modelsPath, { fetch: fetchMock });
-		await secondRegistry.refresh();
-
-		expect(secondRegistry.find("vllm", "New")?.contextWindow).toBe(524_288);
-		expect(calls).toEqual(["http://192.168.5.3:8085/v1/models", "http://192.168.5.4:8085/v1/models"]);
-	});
-	test("loads built-in vllm cache from the configured baseUrl namespace", async () => {
-		fs.writeFileSync(
-			modelsPath,
-			["providers:", "  vllm:", "    baseUrl: http://192.168.5.3:8085/v1", "    auth: none"].join("\n"),
-		);
-
-		const fetchMock: (input: string | URL | Request) => Promise<Response> = async input => {
-			const url = String(input);
-			if (url !== "http://192.168.5.3:8085/v1/models") {
-				throw new Error(`Unexpected URL: ${url}`);
-			}
-			return new Response(JSON.stringify({ data: [{ id: "Cached", max_model_len: 262_144 }] }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		};
-
-		const firstRegistry = new ModelRegistryImpl(authStorage, modelsPath, { fetch: fetchMock });
-		await firstRegistry.refreshProvider("vllm");
-		expect(firstRegistry.find("vllm", "Cached")?.contextWindow).toBe(262_144);
-
-		const cachedRegistry = new ModelRegistryImpl(authStorage, modelsPath, {
-			fetch: async input => {
-				throw new Error(`Unexpected online fetch: ${String(input)}`);
-			},
-		});
-		expect(cachedRegistry.find("vllm", "Cached")?.contextWindow).toBe(262_144);
 	});
 
 	test("does not send vllm-local placeholder as discovery bearer", async () => {
@@ -468,51 +341,5 @@ describe("issue #970 custom provider discovery", () => {
 		await registry.refreshProvider("vllm");
 
 		expect(registry.getProviderDiscoveryState("vllm")?.status).toBe("ok");
-	});
-
-	test("does not send llama.cpp-local placeholder as discovery bearer", async () => {
-		fs.writeFileSync(
-			modelsPath,
-			[
-				"providers:",
-				"  llama.cpp:",
-				"    baseUrl: http://127.0.0.1:8080",
-				"    apiKey: llama-cpp-local",
-				"    api: openai-responses",
-				"    discovery:",
-				"      type: llama.cpp",
-			].join("\n"),
-		);
-
-		const fetchMock: (input: string | URL | Request, init?: RequestInit) => Promise<Response> = async (
-			input,
-			init,
-		) => {
-			const url = String(input);
-			if (url === "http://127.0.0.1:8080/props") {
-				const headers = init?.headers as Headers | Record<string, string> | undefined;
-				const authHeader = headers instanceof Headers ? headers.get("Authorization") : headers?.Authorization;
-				expect(authHeader).toBeUndefined();
-				return new Response(JSON.stringify({ default_generation_settings: { n_ctx: 8192 } }), {
-					status: 200,
-					headers: { "Content-Type": "application/json" },
-				});
-			}
-			if (url !== "http://127.0.0.1:8080/models") {
-				throw new Error(`Unexpected URL: ${url}`);
-			}
-			const headers = init?.headers as Headers | Record<string, string> | undefined;
-			const authHeader = headers instanceof Headers ? headers.get("Authorization") : headers?.Authorization;
-			expect(authHeader).toBeUndefined();
-			return new Response(JSON.stringify({ data: [{ id: "local-llama" }] }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		};
-
-		const registry = new ModelRegistryImpl(authStorage, modelsPath, { fetch: fetchMock });
-		await registry.refreshProvider("llama.cpp");
-
-		expect(registry.getProviderDiscoveryState("llama.cpp")?.status).toBe("ok");
 	});
 });

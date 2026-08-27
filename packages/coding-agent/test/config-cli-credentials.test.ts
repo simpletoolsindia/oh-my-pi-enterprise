@@ -11,13 +11,7 @@ const paths = Object.keys(SETTINGS_SCHEMA) as SettingPath[];
 
 describe("credential settings", () => {
 	it("marks every known credential, including those with no settings panel entry", () => {
-		for (const path of [
-			"auth.broker.token",
-			"searxng.token",
-			"searxng.basicPassword",
-			"dev.autoqaPush.token",
-			"hindsight.apiToken",
-		] as const) {
+		for (const path of ["auth.broker.token", "mnemopi.embeddingApiKey"] as const) {
 			expect(isCredential(path)).toBe(true);
 		}
 	});
@@ -25,7 +19,7 @@ describe("credential settings", () => {
 	it("classifies UI-visible credentials through the same marker", () => {
 		// One field, not two: there is no separate UI-only masking flag that could
 		// drift away from this classification.
-		for (const path of ["mnemopi.embeddingApiKey", "mnemopi.llmApiKey"] as const) {
+		for (const path of ["mnemopi.embeddingApiKey"] as const) {
 			expect(isCredential(path)).toBe(true);
 		}
 	});
@@ -50,7 +44,7 @@ describe("credential masking reaches every surface", () => {
 		// The panel derives masking from the same classification the CLI uses, so
 		// a credential cannot render as plain text on one surface and dots on the
 		// other.
-		for (const path of ["hindsight.apiToken", "mnemopi.embeddingApiKey", "mnemopi.llmApiKey"] as const) {
+		for (const path of ["mnemopi.embeddingApiKey"] as const) {
 			const def = getSettingDef(path);
 			expect(def?.type).toBe("text");
 			expect(def && "secret" in def ? def.secret : undefined).toBe(true);
@@ -58,7 +52,7 @@ describe("credential masking reaches every surface", () => {
 	});
 
 	it("keeps credentials with no panel entry out of the panel entirely", () => {
-		for (const path of ["auth.broker.token", "searxng.token", "dev.autoqaPush.token"] as const) {
+		for (const path of ["auth.broker.token"] as const) {
 			expect(getSettingDef(path)).toBeUndefined();
 		}
 	});
@@ -127,57 +121,57 @@ describe("config list output", () => {
 	}
 
 	it("masks a configured credential and never prints it", async () => {
-		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "mnemopi.embeddingApiKey", value: SECRET, flags: { json: true } });
 		const output = await humanList();
-		expect(output).toContain("searxng.token = ********");
+		expect(output).toContain("mnemopi.embeddingApiKey = ********");
 		expect(output).not.toContain(SECRET);
 	});
 
 	it("omits the value and flags redaction in JSON, rather than emitting a placeholder", async () => {
-		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "mnemopi.embeddingApiKey", value: SECRET, flags: { json: true } });
 		const { raw, parsed } = await jsonList();
 		// A consumer must not be able to write the stand-in back as the credential.
 		expect(raw).not.toContain(SECRET);
 		expect(raw).not.toContain("********");
-		expect(parsed["searxng.token"]).toMatchObject({ redacted: true });
-		expect(parsed["searxng.token"]).not.toHaveProperty("value");
+		expect(parsed["mnemopi.embeddingApiKey"]).toMatchObject({ redacted: true });
+		expect(parsed["mnemopi.embeddingApiKey"]).not.toHaveProperty("value");
 	});
 
 	it("does not report an unset credential as configured", async () => {
 		// Redacting on classification alone would make a fresh install look like
 		// every credential is already set.
 		const output = await humanList();
-		expect(output).not.toContain("searxng.token = ********");
+		expect(output).not.toContain("mnemopi.embeddingApiKey = ********");
 		const { parsed } = await jsonList();
-		expect(parsed["searxng.token"]).not.toHaveProperty("redacted");
+		expect(parsed["mnemopi.embeddingApiKey"]).not.toHaveProperty("redacted");
 	});
 
 	it("does not report a cleared credential as configured", async () => {
 		// The settings panel persists "" when a credential is cleared and renders
 		// that as unset; `config list` must agree, or a cleared token looks set.
-		await runConfigCommand({ action: "set", key: "searxng.token", value: SECRET, flags: { json: true } });
-		await runConfigCommand({ action: "set", key: "searxng.token", value: "", flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "mnemopi.embeddingApiKey", value: SECRET, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "mnemopi.embeddingApiKey", value: "", flags: { json: true } });
 		const output = await humanList();
-		expect(output).not.toContain("searxng.token = ********");
+		expect(output).not.toContain("mnemopi.embeddingApiKey = ********");
 		const { parsed } = await jsonList();
-		expect(parsed["searxng.token"]).not.toHaveProperty("redacted");
+		expect(parsed["mnemopi.embeddingApiKey"]).not.toHaveProperty("redacted");
 	});
 
-	it("leaves the Hindsight server URL readable", async () => {
-		// It sits beside the API token under the same display condition, and is an
-		// ordinary endpoint: masking it hides a value users need to inspect.
-		const url = "https://hindsight.example.test";
-		await runConfigCommand({ action: "set", key: "hindsight.apiUrl", value: url, flags: { json: true } });
-		await runConfigCommand({ action: "set", key: "hindsight.apiToken", value: SECRET, flags: { json: true } });
-		expect(isCredential("hindsight.apiUrl")).toBe(false);
+	it("leaves a plain non-credential setting readable beside a credential", async () => {
+		// mnemopi.dbPath sits in the same settings group as embeddingApiKey and is
+		// an ordinary path: masking it hides a value users need to inspect.
+		const dbPath = "/tmp/mnemopi-test.db";
+		await runConfigCommand({ action: "set", key: "mnemopi.dbPath", value: dbPath, flags: { json: true } });
+		await runConfigCommand({ action: "set", key: "mnemopi.embeddingApiKey", value: SECRET, flags: { json: true } });
+		expect(isCredential("mnemopi.dbPath")).toBe(false);
 
 		const output = await humanList();
-		expect(output).toContain(`hindsight.apiUrl = ${url}`);
-		expect(output).toContain("hindsight.apiToken = ********");
+		expect(output).toContain(`mnemopi.dbPath = ${dbPath}`);
+		expect(output).toContain("mnemopi.embeddingApiKey = ********");
 		expect(output).not.toContain(SECRET);
 
 		const { parsed } = await jsonList();
-		expect(parsed["hindsight.apiUrl"]).toMatchObject({ value: url });
-		expect(parsed["hindsight.apiToken"]).toMatchObject({ redacted: true });
+		expect(parsed["mnemopi.dbPath"]).toMatchObject({ value: dbPath });
+		expect(parsed["mnemopi.embeddingApiKey"]).toMatchObject({ redacted: true });
 	});
 });

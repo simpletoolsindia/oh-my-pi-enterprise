@@ -657,8 +657,6 @@ export interface BuildSystemPromptOptions {
 	xdevTools?: Array<{ name: string; summary: string; dynamic?: boolean }>;
 	/** Full docs + JSON schema for every `xd://`-mounted tool, inlined into the protocol section so no discovery `read` is needed. */
 	xdevDocs?: string;
-	/** Whether Auto-QA grievance reporting is enabled; renders the `xd://report_issue` note. */
-	autoQaEnabled?: boolean;
 }
 
 /** Result of building provider-facing system prompt messages. */
@@ -716,7 +714,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		renderMermaid = true,
 		xdevTools = [],
 		xdevDocs = "",
-		autoQaEnabled = false,
 		activeRepoContext: providedActiveRepoContext,
 	} = options;
 	const inlineToolDescriptors = providedInlineToolDescriptors ?? false;
@@ -1009,7 +1006,6 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		xdevTools,
 		hasDynamicXdevTools: xdevTools.some(mounted => mounted.dynamic === true),
 		xdevDocs,
-		autoQaEnabled,
 	};
 	const rendered = prompt.render(resolvedCustomPrompt ? customSystemPromptTemplate : systemPromptTemplate, data);
 	const systemPrompt = [rendered];

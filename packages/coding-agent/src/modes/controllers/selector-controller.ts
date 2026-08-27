@@ -25,13 +25,6 @@ import { settings } from "../../config/settings";
 import { disableProvider, enableProvider } from "../../discovery";
 import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
 import {
-	getInstalledPluginsRegistryPath,
-	getMarketplacesCacheDir,
-	getMarketplacesRegistryPath,
-	getPluginsCacheDir,
-	MarketplaceManager,
-} from "../../extensibility/plugins/marketplace";
-import {
 	getAvailableThemes,
 	getSymbolTheme,
 	previewTheme,
@@ -69,13 +62,7 @@ import {
 	concreteThinkingLevel,
 	parseConfiguredThinkingLevel,
 } from "../../thinking";
-import {
-	isSearchProviderId,
-	setExcludedSearchProviders,
-	setImageProviderOrder,
-	setSearchProviderOrder,
-	type ToolSession,
-} from "../../tools";
+import { setImageProviderOrder, type ToolSession } from "../../tools";
 import { AskTool, type AskToolDetails, type AskToolInput } from "../../tools/ask";
 import { shortenPath } from "../../tools/render-utils";
 import { ToolAbortError } from "../../tools/tool-errors";
@@ -95,7 +82,6 @@ import { LogoutAccountSelectorComponent } from "../components/logout-account-sel
 import { ModelHubComponent, type ModelRoleSelectionScope } from "../components/model-hub";
 import { ModelPickerComponent } from "../components/model-picker";
 import { OAuthSelectorComponent } from "../components/oauth-selector";
-import { PluginSelectorComponent } from "../components/plugin-selector";
 import { ReadToolGroupComponent } from "../components/read-tool-group";
 import { ResetUsageSelectorComponent } from "../components/reset-usage-selector";
 import { renderSegmentTrack } from "../components/segment-track";
@@ -720,16 +706,6 @@ export class SelectorController {
 			}
 
 			// Provider settings - update runtime preferences
-			case "providers.webSearchOrder":
-				if (Array.isArray(value)) {
-					setSearchProviderOrder(value.filter(isSearchProviderId));
-				}
-				break;
-			case "providers.webSearchExclude":
-				if (Array.isArray(value)) {
-					setExcludedSearchProviders(value.filter(isSearchProviderId));
-				}
-				break;
 			case "providers.imageOrder":
 				if (Array.isArray(value)) {
 					setImageProviderOrder(value.filter((entry): entry is string => typeof entry === "string"));
@@ -1090,93 +1066,6 @@ export class SelectorController {
 		if (succeeded) {
 			this.#showModelHub({ initialProviderId: providerId });
 		}
-	}
-
-	async showPluginSelector(mode: "install" | "uninstall" = "install"): Promise<void> {
-		const mgr = new MarketplaceManager({
-			marketplacesRegistryPath: getMarketplacesRegistryPath(),
-			installedRegistryPath: getInstalledPluginsRegistryPath(),
-			projectInstalledRegistryPath: (await resolveActiveProjectRegistryPath(getProjectDir())) ?? undefined,
-			marketplacesCacheDir: getMarketplacesCacheDir(),
-			pluginsCacheDir: getPluginsCacheDir(),
-			clearPluginRootsCache: clearPluginRootsAndCaches,
-		});
-
-		const [marketplaces, installed] = await Promise.all([mgr.listMarketplaces(), mgr.listInstalledPlugins()]);
-		const installedIds = new Set(installed.map(p => p.id));
-
-		if (mode === "uninstall") {
-			// Show only installed plugins for uninstall
-			const items = installed.map(p => {
-				const entry = p.entries[0];
-				const atIdx = p.id.lastIndexOf("@");
-				const pluginName = atIdx > 0 ? p.id.slice(0, atIdx) : p.id;
-				const mkt = atIdx > 0 ? p.id.slice(atIdx + 1) : "unknown";
-				return {
-					plugin: { name: pluginName, version: entry?.version, description: undefined as string | undefined },
-					marketplace: mkt,
-					scope: p.scope,
-				};
-			});
-			this.showSelector(done => {
-				const selector = new PluginSelectorComponent(marketplaces.length, items, new Set(), {
-					onSelect: async (name, marketplace, scope) => {
-						done();
-						const pluginId = `${name}@${marketplace}`;
-						this.ctx.showStatus(`Uninstalling ${pluginId}...`);
-						this.ctx.ui.requestRender();
-						try {
-							await mgr.uninstallPlugin(pluginId, scope);
-							this.ctx.showStatus(`Uninstalled ${pluginId}`);
-						} catch (err) {
-							this.ctx.showStatus(`Uninstall failed: ${err}`);
-						}
-						this.ctx.ui.requestRender();
-					},
-					onCancel: () => {
-						done();
-						this.ctx.ui.requestRender();
-					},
-				});
-				return { component: selector, focus: selector.getSelectList() };
-			});
-			return;
-		}
-
-		// Install mode: show all available plugins from all marketplaces
-		const allPlugins: Array<{
-			plugin: { name: string; version?: string; description?: string };
-			marketplace: string;
-		}> = [];
-		for (const mkt of marketplaces) {
-			const plugins = await mgr.listAvailablePlugins(mkt.name);
-			for (const plugin of plugins) {
-				allPlugins.push({ plugin, marketplace: mkt.name });
-			}
-		}
-
-		this.showSelector(done => {
-			const selector = new PluginSelectorComponent(marketplaces.length, allPlugins, installedIds, {
-				onSelect: async (name, marketplace) => {
-					done();
-					this.ctx.showStatus(`Installing ${name} from ${marketplace}...`);
-					this.ctx.ui.requestRender();
-					try {
-						const force = installedIds.has(`${name}@${marketplace}`);
-						await mgr.installPlugin(name, marketplace, { force });
-						this.ctx.showStatus(`Installed ${name} from ${marketplace}`);
-					} catch (err) {
-						this.ctx.showStatus(`Install failed: ${err}`);
-					}
-					this.ctx.ui.requestRender();
-				},
-				onCancel: () => {
-					done();
-					this.ctx.ui.requestRender();
-				},
-			});
-			return { component: selector, focus: selector.getSelectList() };
-		});
 	}
 
 	showUserMessageSelector(): void {
@@ -2149,8 +2038,6 @@ export class SelectorController {
 			expandKeys: this.ctx.keybindings.getKeys("app.tools.expand"),
 			onDone: done,
 			requestRender: () => this.ctx.ui.requestRender(),
-			registry: this.ctx.collabGuest?.agentRegistry,
-			remote: this.ctx.collabGuest?.hubRemote,
 			ui: this.ctx.ui,
 			getTool: name => this.ctx.session.getToolByName(name),
 			isBuiltInTool: name => this.ctx.session.hasBuiltInTool(name),

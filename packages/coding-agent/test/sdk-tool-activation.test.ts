@@ -1894,7 +1894,7 @@ describe("createAgentSession defaultInactive tool activation", () => {
 				"providers.imageOrder": ["openai"],
 				"generate_image.enabled": true,
 				"speechgen.enabled": true,
-				"memory.backend": "hindsight",
+				"memory.backend": "mnemopi",
 				"autolearn.enabled": true,
 			});
 
@@ -2022,28 +2022,6 @@ describe("createAgentSession defaultInactive tool activation", () => {
 			expect(session.getActiveToolNames()).toEqual(["read", "sdk_custom_tool"]);
 		} finally {
 			await session.dispose();
-		}
-	});
-
-	it("renders report-issue guidance only for unrestricted sessions", async () => {
-		const normalDir = makeTempDir();
-		const restrictedDir = makeTempDir();
-		const { session: normal } = await createAgentSession({
-			...baseOptions(normalDir),
-			settings: Settings.isolated({ "dev.autoqa": true }),
-		});
-		const { session: restricted } = await createAgentSession({
-			...baseOptions(restrictedDir),
-			settings: Settings.isolated({ "dev.autoqa": true }),
-			toolNames: ["read"],
-			restrictToolNames: true,
-		});
-
-		try {
-			expect(normal.systemPrompt.join("\n")).toContain("xd://report_issue");
-			expect(restricted.systemPrompt.join("\n")).not.toContain("xd://report_issue");
-		} finally {
-			await Promise.all([normal.dispose(), restricted.dispose()]);
 		}
 	});
 

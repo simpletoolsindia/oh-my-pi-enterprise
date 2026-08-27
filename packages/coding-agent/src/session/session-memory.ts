@@ -4,7 +4,6 @@ import type { Agent, AgentTool } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
 import type { Settings } from "../config/settings";
-import type { HindsightSessionState } from "../hindsight/state";
 import { resolveMemoryBackend } from "../memory-backend/resolve";
 import type { MemoryBackendStartOptions } from "../memory-backend/types";
 import type { MnemopiSessionState } from "../mnemopi/state";
@@ -16,8 +15,6 @@ export interface SessionMemoryHost {
 	modelRegistry: ModelRegistry;
 	isDisposed(): boolean;
 	memoryBackendSession(): MemoryBackendStartOptions["session"];
-	getHindsightSessionState(): HindsightSessionState | undefined;
-	setHindsightSessionState(state: HindsightSessionState | undefined): void;
 	getMnemopiSessionState(): MnemopiSessionState | undefined;
 	takeMnemopiSessionState(): MnemopiSessionState | undefined;
 	setBaseSystemPrompt(prompt: string[]): void;
@@ -75,15 +72,7 @@ export class SessionMemory {
 	}
 	/** Rekeys every active memory backend to the current provider session. */
 	rekeyForCurrentSessionId(): void {
-		this.#rekeyHindsightMemoryForCurrentSessionId();
 		this.#rekeyMnemopiMemoryForCurrentSessionId();
-	}
-
-	#rekeyHindsightMemoryForCurrentSessionId(): void {
-		if (this.#host.settings.get("memory.backend") !== "hindsight") return;
-		const sid = this.#host.agent.sessionId;
-		if (!sid) return;
-		this.#host.getHindsightSessionState()?.setSessionId(sid);
 	}
 
 	#rekeyMnemopiMemoryForCurrentSessionId(): void {
@@ -94,14 +83,6 @@ export class SessionMemory {
 	}
 
 	/** New session file: reset auto-recall / retain-threshold counters for the new transcript. */
-	#resetHindsightConversationTrackingIfHindsight(): boolean {
-		if (this.#host.settings.get("memory.backend") !== "hindsight") return false;
-		const state = this.#host.getHindsightSessionState();
-		if (!state || state.aliasOf) return false;
-		state.resetConversationTracking();
-		return true;
-	}
-
 	#resetMnemopiConversationTrackingIfMnemopi(): boolean {
 		if (this.#host.settings.get("memory.backend") !== "mnemopi") return false;
 		const state = this.#host.getMnemopiSessionState();
@@ -113,13 +94,12 @@ export class SessionMemory {
 	/** Resets transcript-scoped memory counters and removes a promoted prompt. */
 	async resetContextForNewTranscript(): Promise<void> {
 		const hadPromotedMemoryPrompt = this.#baseSystemPromptBeforeMemoryPromotion !== undefined;
-		const resetHindsight = this.#resetHindsightConversationTrackingIfHindsight();
 		const resetMnemopi = this.#resetMnemopiConversationTrackingIfMnemopi();
 		if (hadPromotedMemoryPrompt) {
 			this.#host.setBaseSystemPrompt(this.#baseSystemPromptBeforeMemoryPromotion!);
 			this.#baseSystemPromptBeforeMemoryPromotion = undefined;
 		}
-		if (resetHindsight || resetMnemopi || hadPromotedMemoryPrompt) {
+		if (resetMnemopi || hadPromotedMemoryPrompt) {
 			await this.#host.refreshBaseSystemPrompt();
 		}
 	}
@@ -145,17 +125,6 @@ export class SessionMemory {
 
 	async #disposeMemoryBackendState(consolidateMnemopi = true): Promise<void> {
 		this.cancelLocalMemoryStartup();
-		const hindsight = this.#host.getHindsightSessionState();
-		if (hindsight) {
-			try {
-				await hindsight.flushRetainQueue();
-			} catch (error) {
-				logger.warn("Memory lifecycle: Hindsight flush failed", { error: String(error) });
-			}
-			this.#host.setHindsightSessionState(undefined);
-			hindsight.dispose();
-		}
-
 		const mnemopi = this.#host.takeMnemopiSessionState();
 		if (mnemopi) {
 			try {

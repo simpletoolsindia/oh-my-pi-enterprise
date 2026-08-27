@@ -20,7 +20,7 @@ import {
 } from "@oh-my-pi/pi-ai/providers/anthropic";
 import type { MessageCreateParams } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
 import { claudeCodeVersion } from "@oh-my-pi/pi-ai/providers/claude-code-fingerprint";
-import { getEnvApiKey, streamSimple } from "@oh-my-pi/pi-ai/stream";
+import { streamSimple } from "@oh-my-pi/pi-ai/stream";
 import type {
 	AssistantMessage,
 	Context,
@@ -2295,20 +2295,6 @@ describe("Anthropic request fingerprint alignment", () => {
 						dynamicHeaders: {},
 					}),
 				).toThrow("Both CLAUDE_CODE_CLIENT_CERT and CLAUDE_CODE_CLIENT_KEY must be set for mTLS.");
-			},
-		);
-	});
-
-	it("resolves Anthropic Foundry API key when Foundry mode is enabled", async () => {
-		await withEnv(
-			{
-				CLAUDE_CODE_USE_FOUNDRY: "true",
-				ANTHROPIC_FOUNDRY_API_KEY: "foundry-env-token",
-				ANTHROPIC_OAUTH_TOKEN: "sk-ant-oat-should-not-win",
-				ANTHROPIC_API_KEY: "sk-ant-api-should-not-win",
-			},
-			() => {
-				expect(getEnvApiKey("anthropic")).toBe("foundry-env-token");
 			},
 		);
 	});

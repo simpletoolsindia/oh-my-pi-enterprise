@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import { Effort } from "@oh-my-pi/pi-ai";
 import { __resetVertexTokenCache } from "@oh-my-pi/pi-ai/providers/google-auth";
-import { complete, getEnvApiKey, stream } from "@oh-my-pi/pi-ai/stream";
+import { complete, stream } from "@oh-my-pi/pi-ai/stream";
 import type { Api, Context, ImageContent, Model, OptionsForApi, Tool, ToolResultMessage } from "@oh-my-pi/pi-ai/types";
 import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
@@ -403,35 +403,6 @@ describe("Generate E2E Tests", () => {
 	});
 
 	describe("google-vertex env auth", () => {
-		it("treats GOOGLE_CLOUD_API_KEY as a configured google-vertex credential", () => {
-			const originalApiKey = Bun.env.GOOGLE_CLOUD_API_KEY;
-			const originalProject = Bun.env.GOOGLE_CLOUD_PROJECT;
-			const originalGcloudProject = Bun.env.GCLOUD_PROJECT;
-			const originalLocation = Bun.env.GOOGLE_CLOUD_LOCATION;
-			const originalApplicationCredentials = Bun.env.GOOGLE_APPLICATION_CREDENTIALS;
-
-			try {
-				Bun.env.GOOGLE_CLOUD_API_KEY = "vertex-test-key";
-				delete Bun.env.GOOGLE_CLOUD_PROJECT;
-				delete Bun.env.GCLOUD_PROJECT;
-				delete Bun.env.GOOGLE_CLOUD_LOCATION;
-				delete Bun.env.GOOGLE_APPLICATION_CREDENTIALS;
-
-				expect(getEnvApiKey("google-vertex")).toBe("vertex-test-key");
-			} finally {
-				if (originalApiKey === undefined) delete Bun.env.GOOGLE_CLOUD_API_KEY;
-				else Bun.env.GOOGLE_CLOUD_API_KEY = originalApiKey;
-				if (originalProject === undefined) delete Bun.env.GOOGLE_CLOUD_PROJECT;
-				else Bun.env.GOOGLE_CLOUD_PROJECT = originalProject;
-				if (originalGcloudProject === undefined) delete Bun.env.GCLOUD_PROJECT;
-				else Bun.env.GCLOUD_PROJECT = originalGcloudProject;
-				if (originalLocation === undefined) delete Bun.env.GOOGLE_CLOUD_LOCATION;
-				else Bun.env.GOOGLE_CLOUD_LOCATION = originalLocation;
-				if (originalApplicationCredentials === undefined) delete Bun.env.GOOGLE_APPLICATION_CREDENTIALS;
-				else Bun.env.GOOGLE_APPLICATION_CREDENTIALS = originalApplicationCredentials;
-			}
-		});
-
 		it("ignores sentinel apiKey values like '<authenticated>' passed from agent loop", async () => {
 			const originalProject = Bun.env.GOOGLE_CLOUD_PROJECT;
 			const originalLocation = Bun.env.GOOGLE_CLOUD_LOCATION;

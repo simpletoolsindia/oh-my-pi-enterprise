@@ -149,7 +149,6 @@ import { expandSlashCommand, type FileSlashCommand } from "../extensibility/slas
 import { normalizeToolEventInput, resolveToolEventInput } from "../extensibility/tool-event-input";
 import { GoalRuntime } from "../goals/runtime";
 import type { GoalModeState } from "../goals/state";
-import type { HindsightSessionState } from "../hindsight/state";
 import { type LocalProtocolOptions, resolveLocalUrlToPath } from "../internal-urls";
 import type { IrcMessage } from "../irc/bus";
 import type { DaemonCompletionNotification } from "../launch/protocol";
@@ -693,7 +692,6 @@ export class AgentSession {
 	#yieldTerminationPending = false;
 	#synchronouslyTerminatedYieldToolCallIds = new Set<string>();
 	#providerSessionState = new Map<string, ProviderSessionState>();
-	#hindsightSessionState: HindsightSessionState | undefined = undefined;
 	readonly #memory: SessionMemory;
 	readonly rawSseDebugBuffer: RawSseDebugBuffer;
 
@@ -1185,8 +1183,6 @@ export class AgentSession {
 			modelRegistry: this.#modelRegistry,
 			isDisposed: () => this.#isDisposed,
 			memoryBackendSession: () => this,
-			getHindsightSessionState: () => this.getHindsightSessionState(),
-			setHindsightSessionState: state => this.setHindsightSessionState(state),
 			getMnemopiSessionState: () => this.getMnemopiSessionState(),
 			takeMnemopiSessionState: () => setMnemopiSessionState(this, undefined),
 			setBaseSystemPrompt: prompt => {
@@ -1792,16 +1788,6 @@ export class AgentSession {
 	/** Hint forwarded to provider calls that support websocket transport. */
 	get preferWebsockets(): boolean | undefined {
 		return this.#preferWebsockets;
-	}
-
-	getHindsightSessionState(): HindsightSessionState | undefined {
-		return this.#hindsightSessionState;
-	}
-
-	setHindsightSessionState(state: HindsightSessionState | undefined): HindsightSessionState | undefined {
-		const previous = this.#hindsightSessionState;
-		this.#hindsightSessionState = state;
-		return previous;
 	}
 
 	getMnemopiSessionState(): MnemopiSessionState | undefined {
@@ -4159,7 +4145,6 @@ export class AgentSession {
 		await this.#drainAutolearnCapture();
 		await this.#memory.transition;
 
-		const hindsightState = this.getHindsightSessionState();
 		const mnemopiState = setMnemopiSessionState(this, undefined);
 		const advisorRecorderClosed = this.#advisors.recorderClosed();
 		const results = await Promise.allSettled([
@@ -4170,7 +4155,6 @@ export class AgentSession {
 			shutdownTinyTitleClient(),
 			this.#disconnectOwnedMcp(),
 			advisorRecorderClosed,
-			hindsightState?.flushRetainQueue() ?? Promise.resolve(),
 			this.#disposeMnemopi(mnemopiState, options.mnemopiConsolidateTimeoutMs),
 		]);
 		for (const result of results) {
@@ -4186,8 +4170,6 @@ export class AgentSession {
 		this.#movedFromEmptySessionFile = undefined;
 		this.#closeAllProviderSessions("dispose");
 		this.#maintenance.cancelSpeculation();
-		this.setHindsightSessionState(undefined);
-		hindsightState?.dispose();
 		this.#disconnectFromAgent();
 		if (this.#unsubscribeAppendOnly) {
 			this.#unsubscribeAppendOnly();

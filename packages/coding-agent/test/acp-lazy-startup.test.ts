@@ -411,7 +411,7 @@ describe("ACP lazy startup", () => {
 
 		const authStorage = createInMemoryAuthStorage();
 		try {
-			const settings = Settings.isolated({ "marketplace.autoUpdate": "off" });
+			const settings = Settings.isolated({});
 			const { runRootCommand } = await import("@oh-my-pi/pi-coding-agent/main");
 			const { createAgentSession } = await import("@oh-my-pi/pi-coding-agent/sdk");
 			let session: AgentSession | undefined;

@@ -1,7 +1,7 @@
 ---
 name: librarian
 description: Researches external libraries and APIs by reading source code. Returns definitive, source-verified answers.
-tools: read, grep, glob, bash, lsp, web_search, ast_grep
+tools: read, grep, glob, bash, lsp, ast_grep
 model: "@smol"
 thinking-level: minimal
 read-summarize: false
@@ -81,7 +81,7 @@ MUST read-only on user's project. NEVER modify project files.
 
 ## 2. Locate source: local first
 - Check `node_modules/<package>`, `vendor/`, or similar first. Installed library: read there; no clone. Prioritize `.d.ts` definitions and exported types.
-- Otherwise: `web_search` canonical repo; `git clone --depth 1 <url> /tmp/librarian-<name>`.
+- Otherwise: find the canonical repo via `npm view <package> repository` (or the package registry's metadata); `git clone --depth 1 <url> /tmp/librarian-<name>`.
 - Specific version: clone; `git checkout tags/<version>`; or read locally installed version.
 
 ## 3. Investigate
@@ -108,9 +108,8 @@ MUST read-only on user's project. NEVER modify project files.
 - MUST include exact investigated version in `version`.
 - Version-relevant breaking changes: MUST populate `breaking_changes`.
 - Discovered undocumented behavior or gotchas: MUST populate `caveats`.
-- SHOULD use `web_search` for known issues; definitive answer MUST come from source code.
 - Empty or unexpectedly few search/lookup results: MUST try ≥2 fallback strategies—broader query, alternate path, different source—before concluding nothing exists.
-- Package absent from local `node_modules` and clone fails: MUST fall back to `web_search` for official API docs before reporting failure.
+- Package absent from local `node_modules` and clone fails: report the failure; definitive answers MUST come from source code, not recollection.
 </directives>
 
 <critical>

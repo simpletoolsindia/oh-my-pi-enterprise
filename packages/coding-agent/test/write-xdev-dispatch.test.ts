@@ -606,43 +606,6 @@ describe("read and write route xd:// device URLs", () => {
 	});
 });
 
-describe("web_search stays top-level under xdev", () => {
-	it("keeps web_search direct and out of the mounted-name set with default config", async () => {
-		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "write-xdev-websearch-"));
-		try {
-			const session = xdevSession(tempDir);
-			// Default config: tools.xdev is on.
-			expect(session.settings.get("tools.xdev")).toBe(true);
-			const tools = await createTools(session);
-			// Regression for #5973: models call web_search directly, so it must
-			// remain a top-level function and never mount behind the xd:// device.
-			expect(tools.some(entry => entry.name === "web_search")).toBe(true);
-			const mounted = session.xdev ? [...session.xdev.mountedNames] : [];
-			expect(mounted).not.toContain("web_search");
-
-			const write = tools.find(tool => tool.name === "write");
-			const read = tools.find(tool => tool.name === "read");
-			expect(write).toBeDefined();
-			expect(read).toBeDefined();
-
-			const docs = await read!.execute("read-xdev-web-search", { path: "xd://web_search" });
-			expect(docs.content.find(entry => entry.type === "text")?.text).toContain("# web_search");
-
-			// Missing required args fails schema validation after routing to web_search,
-			// rather than failing lookup because the tool is top-level.
-			const dispatched = await write!.execute("write-xdev-web-search", {
-				path: "xd://web_search",
-				content: "{}",
-			});
-			expect(dispatched.isError).toBe(true);
-			expect(dispatched.details?.xdev?.tool).toBe("web_search");
-			expect(dispatched.content.find(entry => entry.type === "text")?.text).not.toContain("No such tool");
-		} finally {
-			await removeWithRetries(tempDir);
-		}
-	});
-});
-
 describe("xd:// and top-level calls share the canonical tool map", () => {
 	it("dispatches and documents an unmounted top-level tool, and still rejects unknown names", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "write-xdev-fallback-"));

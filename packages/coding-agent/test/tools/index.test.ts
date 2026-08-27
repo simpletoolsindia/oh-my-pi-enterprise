@@ -10,7 +10,7 @@ function createTestSession(overrides: Partial<ToolSession> = {}): ToolSession {
 		hasUI: false,
 		getSessionFile: () => null,
 		getSessionSpawns: () => "*",
-		settings: Settings.isolated(),
+		settings: Settings.isolated({ "autolearn.enabled": false, "memory.backend": "off" }),
 		...overrides,
 	};
 }
@@ -19,6 +19,8 @@ function createSettingsWithOverrides(overrides: Partial<Record<SettingPath, unkn
 	return Settings.isolated({
 		"lsp.formatOnWrite": true,
 		"bashInterceptor.enabled": true,
+		"autolearn.enabled": false,
+		"memory.backend": "off",
 		...overrides,
 	});
 }
@@ -63,7 +65,6 @@ describe("createTools", () => {
 		expect(names).toContain("lsp");
 		expect(names).toContain("task");
 		expect(names).toContain("todo");
-		expect(names).toContain("web_search");
 		expect(names).not.toContain("fetch");
 		expect(names).not.toContain("vim");
 	});
@@ -254,7 +255,6 @@ describe("createTools", () => {
 				"astEdit.enabled": false,
 				"bash.enabled": false,
 				"launch.enabled": false,
-				"web_search.enabled": false,
 				"browser.enabled": false,
 				"inspect_image.enabled": false,
 			}),
@@ -268,7 +268,6 @@ describe("createTools", () => {
 		expect(names).not.toContain("grep");
 		expect(names).not.toContain("ast_grep");
 		expect(names).not.toContain("ast_edit");
-		expect(names).not.toContain("web_search");
 		expect(names).not.toContain("browser");
 		expect(names).not.toContain("inspect_image");
 

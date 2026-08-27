@@ -1,8 +1,10 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { CompactionCancelledError } from "@oh-my-pi/pi-agent-core/compaction";
 import { logger, setProjectDir } from "@oh-my-pi/pi-utils";
 import { applyProviderGlobalsFromSettings } from "../config/provider-globals";
+import { parseExportArgs } from "../export/html/args";
 import { memoryStatsUnavailableMessage, resolveMemoryBackend } from "../memory-backend";
 import type { FreshSessionResult, HandoffResult } from "../session/agent-session";
 import { COMPACT_MODES, parseCompactArgs } from "../session/compact-modes";
@@ -11,6 +13,7 @@ import { resolveResumableSession } from "../session/session-listing";
 import { toggleSessionPin } from "../session/session-pins";
 import { formatShakeSummary, type ShakeMode } from "../session/shake-types";
 import { resolveToCwd } from "../tools/path-utils";
+import { copyToClipboard } from "../utils/clipboard";
 import { commandConsumed, errorMessage, usage } from "./helpers/parse";
 import { handleSshAcp } from "./helpers/ssh";
 import type {
@@ -20,6 +23,58 @@ import type {
 	SlashCommandSpec,
 	TuiSlashCommandRuntime,
 } from "./types";
+
+const FENCED_CODE_BLOCK_RE = /```[^\n]*\n([\s\S]*?)```/g;
+
+/** Last fenced code block (```lang\n...\n```) found in a text string, if any. */
+function lastFencedCodeBlock(text: string): string | undefined {
+	let last: string | undefined;
+	FENCED_CODE_BLOCK_RE.lastIndex = 0;
+	for (let m = FENCED_CODE_BLOCK_RE.exec(text); m; m = FENCED_CODE_BLOCK_RE.exec(text)) {
+		last = m[1].replace(/\n$/, "");
+	}
+	return last;
+}
+
+/** Most recent fenced code block across the transcript, scanning from the last message backward. */
+function extractLastCodeBlock(messages: readonly AgentMessage[]): string | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		for (let j = message.content.length - 1; j >= 0; j--) {
+			const block = message.content[j] as { type?: string; text?: unknown };
+			if (block?.type === "text" && typeof block.text === "string") {
+				const found = lastFencedCodeBlock(block.text);
+				if (found !== undefined) return found;
+			}
+		}
+	}
+	return undefined;
+}
+
+interface RunnableCommand {
+	label: string;
+	text: string;
+}
+
+/** Most recent runnable bash/eval tool call across the transcript, scanning from the last message backward. */
+function extractLastRunnableCommand(messages: readonly AgentMessage[]): RunnableCommand | undefined {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i];
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		for (let j = message.content.length - 1; j >= 0; j--) {
+			const block = message.content[j] as { type?: string; name?: string; arguments?: Record<string, unknown> };
+			if (block?.type !== "toolCall") continue;
+			if (block.name === "bash" && typeof block.arguments?.command === "string") {
+				return { label: "bash command", text: block.arguments.command };
+			}
+			if (block.name === "eval" && typeof block.arguments?.code === "string") {
+				return { label: "eval code", text: block.arguments.code };
+			}
+		}
+	}
+	return undefined;
+}
 
 function formatFreshSessionResult(result: FreshSessionResult): string {
 	const stateLabel = result.closedProviderSessions === 1 ? "provider state" : "provider states";
@@ -502,11 +557,6 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 					await runtime.output(payload ?? memoryStatsUnavailableMessage(backend.id, verb));
 					return commandConsumed();
 				}
-				case "mm":
-					return usage(
-						"Mental-model maintenance via /memory mm is unsupported in ACP mode; use the hindsight HTTP API directly.",
-						runtime,
-					);
 				default:
 					return usage("Usage: /memory <view|stats|diagnose|clear|reset|enqueue|rebuild>", runtime);
 			}
@@ -657,6 +707,107 @@ export const BUILTIN_LIFECYCLE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> =
 		acpDescription: "List this session's workspace directories",
 		handle: async (_command, runtime) => {
 			await runtime.output(formatWorkspaceDirectories(runtime));
+			return commandConsumed();
+		},
+	},
+	{
+		name: "copy",
+		icon: "clipboard",
+		description: "Copy the last code block or runnable command to the clipboard",
+		inlineHint: "[code|cmd]",
+		allowArgs: true,
+		handleTui: async (command, runtime) => {
+			const arg = command.args.trim().toLowerCase();
+			const messages = runtime.ctx.session.messages;
+			if (arg === "code") {
+				const block = extractLastCodeBlock(messages);
+				if (block === undefined) {
+					runtime.ctx.showWarning("No code block found to copy.");
+				} else {
+					await copyToClipboard(block);
+					runtime.ctx.showStatus("Copied code block to clipboard");
+				}
+			} else if (arg === "cmd") {
+				const found = extractLastRunnableCommand(messages);
+				if (!found) {
+					runtime.ctx.showWarning("No runnable command found to copy.");
+				} else {
+					await copyToClipboard(found.text);
+					runtime.ctx.showStatus(`Copied ${found.label} to clipboard`);
+				}
+			} else {
+				runtime.ctx.showCopySelector();
+			}
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
+		name: "export",
+		icon: "rocket",
+		description: "Export the session transcript to an HTML file",
+		acpDescription: "Export the session transcript to an HTML file",
+		inlineHint: "[--themes] [path]",
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			try {
+				const { outputPath, useUserThemes } = parseExportArgs(command.args);
+				const filePath = await runtime.session.exportToHtml(outputPath, useUserThemes);
+				await runtime.output(`Session exported to: ${filePath}`);
+			} catch (error: unknown) {
+				await runtime.output(`Failed to export session: ${errorMessage(error)}`);
+			}
+			return commandConsumed();
+		},
+	},
+	{
+		name: "dump",
+		description: "Output the session transcript as plain text",
+		acpDescription: "Output the session transcript as plain text",
+		handle: async (_command, runtime) => {
+			const formatted = runtime.session.formatSessionAsText();
+			if (!formatted) {
+				await runtime.output("No messages to dump yet.");
+				return commandConsumed();
+			}
+			let sidecarPath: string | undefined;
+			try {
+				sidecarPath = await runtime.session.dumpLlmRequestToTmpDir();
+			} catch {
+				sidecarPath = undefined;
+			}
+			const doc = sidecarPath
+				? `${formatted}\n\n---\nLLM request JSON: ${sidecarPath}\nThis file persists on disk and may contain raw context/secrets — treat accordingly.`
+				: formatted;
+			await runtime.output(doc);
+			return commandConsumed();
+		},
+	},
+	{
+		name: "browser",
+		description: "Toggle headless mode for the browser tool",
+		acpDescription: "Toggle headless mode for the browser tool",
+		inlineHint: "[visible]",
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			if (command.args.trim().toLowerCase() === "visible") {
+				runtime.settings.set("browser.headless", false);
+				await runtime.output("Browser now runs visibly (headless=false).");
+				return commandConsumed();
+			}
+			const next = !runtime.settings.get("browser.headless");
+			runtime.settings.set("browser.headless", next);
+			await runtime.output(next ? "Browser now runs headless." : "Browser now runs visibly (headless=false).");
+			return commandConsumed();
+		},
+	},
+	{
+		name: "reload-plugins",
+		icon: "redo",
+		description: "Reload skills, slash commands, task agents, and MCP servers without restarting",
+		acpDescription: "Reload skills, slash commands, task agents, and MCP servers",
+		handle: async (_command, runtime) => {
+			await runtime.reloadPlugins();
+			await runtime.output("Reloaded plugins.");
 			return commandConsumed();
 		},
 	},

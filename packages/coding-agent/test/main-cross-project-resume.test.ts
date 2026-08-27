@@ -129,7 +129,7 @@ describe("runRootCommand — cross-project --resume", () => {
 	it("uses the destination cwd and preloads its plugin roots before session creation", async () => {
 		const match = buildGlobalMatch(resumedProject);
 		vi.spyOn(sessionListingModule, "resolveResumableSession").mockResolvedValue(match);
-		const settings = Settings.isolated({ "marketplace.autoUpdate": "off" });
+		const settings = Settings.isolated({});
 		const reloadForCwd = vi.spyOn(settings, "reloadForCwd");
 		// The switch must warm the destination roots via the shared preload helper
 		// (clearPluginRootsAndCaches only fires an unawaited re-warm), so record the
@@ -189,7 +189,6 @@ describe("runRootCommand — cross-project --resume", () => {
 		// yields no patterns, so any resolveModelScope call proves the recompute
 		// ran against the destination settings rather than the launch directory.
 		const settings = Settings.isolated({
-			"marketplace.autoUpdate": "off",
 			enabledModels: [{ paths: [resumedProject], models: ["model-resumed"] }],
 		});
 		const resolveModelScope = vi

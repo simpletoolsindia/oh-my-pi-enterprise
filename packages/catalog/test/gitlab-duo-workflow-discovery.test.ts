@@ -10,8 +10,6 @@ import {
 	fetchGitLabDuoWorkflowModels,
 } from "@oh-my-pi/pi-catalog/discovery/gitlab-duo-workflow";
 import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
-import { isCatalogDescriptor } from "@oh-my-pi/pi-catalog/provider-models/descriptor-types";
-import { PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
 import type { FetchImpl } from "@oh-my-pi/pi-catalog/types";
 
 const TEST_TOKEN = "redacted-test-token";
@@ -509,20 +507,6 @@ describe("GitLab Duo Workflow discovery", () => {
 	it("marks models as non-reasoning so the thinking-effort selector stays hidden", () => {
 		const spec = buildGitLabDuoWorkflowModelSpec({ name: "Opus", ref: "claude_opus_4_8" });
 		expect(getSupportedEfforts(spec)).toEqual([]);
-	});
-
-	it("keeps the gitlab-duo-agent descriptor out of catalog generation discovery", () => {
-		// The descriptor must NOT carry `catalogDiscovery`: that field is the sole gate
-		// for the generator's discovery loop (`isCatalogDescriptor`). Were it present,
-		// \`gen:models\` running on a machine with GitLab credentials would fetch the
-		// account's namespace-scoped `aiChatAvailableModels` and bundle one private
-		// namespace's pinned/selectable catalog into models.json as authoritative for
-		// every fresh install. Only the generic, namespace-free fallback may be bundled;
-		// live namespace-scoped models are discovered at runtime per credential/workspace.
-		const descriptor = PROVIDER_DESCRIPTORS.find(entry => entry.providerId === "gitlab-duo-agent");
-		expect(descriptor).toBeDefined();
-		expect(descriptor?.catalogDiscovery).toBeUndefined();
-		expect(descriptor && isCatalogDescriptor(descriptor)).toBe(false);
 	});
 
 	it("seeds a namespace-free fallback model carrying no account-scoped namespace id", () => {

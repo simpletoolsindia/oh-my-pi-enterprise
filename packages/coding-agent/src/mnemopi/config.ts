@@ -5,7 +5,7 @@ import type { MnemopiOptions } from "@oh-my-pi/pi-mnemopi";
 import { getMemoriesDir, logger } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 
-export type MnemopiLlmMode = "none" | "smol" | "remote";
+export type MnemopiLlmMode = "none" | "smol";
 
 export type MnemopiScoping = "global" | "per-project" | "per-project-tagged";
 
@@ -35,9 +35,6 @@ export interface MnemopiBackendConfig {
 	debug: boolean;
 	providerOptions: MnemopiProviderOptions;
 	llmMode: MnemopiLlmMode;
-	llmBaseUrl?: string;
-	llmApiKey?: string;
-	llmModel?: string;
 }
 
 export function loadMnemopiConfig(settings: Settings, agentDir: string): MnemopiBackendConfig {
@@ -50,7 +47,6 @@ export function loadMnemopiConfig(settings: Settings, agentDir: string): Mnemopi
 	const scope = computeMnemopiBankScope(settings.get("mnemopi.bank"), cwd, scoping);
 	const recallBanks =
 		scoping === "global" ? scope.recallBanks : extendRecallWithLegacyBanks(scope.recallBanks, dbPath, cwd);
-	const llmMode = settings.get("mnemopi.llmMode");
 	const embeddingOverride = settings.get("mnemopi.embeddingModel");
 	const embeddingVariant = settings.get("mnemopi.embeddingVariant");
 	// Map the variant explicitly rather than indexing an object with the raw config
@@ -87,19 +83,9 @@ export function loadMnemopiConfig(settings: Settings, agentDir: string): Mnemopi
 			embeddingModel,
 			embeddingApiUrl: settings.get("mnemopi.embeddingApiUrl"),
 			embeddingApiKey: settings.get("mnemopi.embeddingApiKey"),
-			llm:
-				llmMode === "remote"
-					? {
-							baseUrl: settings.get("mnemopi.llmBaseUrl"),
-							apiKey: settings.get("mnemopi.llmApiKey"),
-							model: settings.get("mnemopi.llmModel"),
-						}
-					: false,
+			llm: false,
 		},
-		llmMode,
-		llmBaseUrl: settings.get("mnemopi.llmBaseUrl"),
-		llmApiKey: settings.get("mnemopi.llmApiKey"),
-		llmModel: settings.get("mnemopi.llmModel"),
+		llmMode: settings.get("mnemopi.llmMode"),
 	};
 }
 

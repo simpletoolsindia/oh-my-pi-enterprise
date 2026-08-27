@@ -10,7 +10,6 @@ import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { logger, sanitizeText } from "@oh-my-pi/pi-utils";
 import { type AgentSession, type AgentSessionEvent, SHUTDOWN_CONSOLIDATE_BUDGET_MS } from "../session/agent-session";
 import { isSilentAbort } from "../session/messages";
-import { flushTelemetryExport } from "../telemetry-export";
 import { initializeExtensions } from "./runtime-init";
 
 /**
@@ -198,14 +197,12 @@ export async function runPrintMode(session: AgentSession, options: PrintModeOpti
 			) {
 				const errorLine = sanitizeText(assistantMsg.errorMessage || `Request ${assistantMsg.stopReason}`);
 				// This branch hard-exits, bypassing the `await session.dispose()` at
-				// the end of runPrintMode. Flush telemetry and dispose the session
-				// HERE so error spans reach the exporter (the postmortem `exit`
-				// handler can't await) and the browser reaper installed in
-				// `dispose()` (releaseTabsForOwner) actually runs — otherwise an
-				// OMP-owned Chromium survives this exit (issue #5643). `dispose()`
-				// is idempotent, so the unreachable call below is a harmless no-op.
+				// the end of runPrintMode. Dispose the session HERE so the browser
+				// reaper installed in `dispose()` (releaseTabsForOwner) actually
+				// runs — otherwise an OMP-owned Chromium survives this exit (issue
+				// #5643). `dispose()` is idempotent, so the unreachable call below
+				// is a harmless no-op.
 				await session.waitForAdvisorCatchup(PRINT_MODE_ERROR_ADVISOR_DRAIN_TIMEOUT_MS);
-				await flushTelemetryExport();
 				await session.dispose({ mnemopiConsolidateTimeoutMs: SHUTDOWN_CONSOLIDATE_BUDGET_MS });
 				const flushed = process.stderr.write(`${errorLine}\n`);
 				if (flushed) {

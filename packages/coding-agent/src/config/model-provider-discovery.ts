@@ -1,5 +1,5 @@
 import type { Api, Model } from "@oh-my-pi/pi-ai/types";
-import { type OpenAICodexAccount, PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models";
+import { PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models";
 import type { AuthStorage, OAuthCredential } from "../session/auth-storage";
 
 const SPECIAL_MODEL_MANAGER_PROVIDER_IDS: readonly string[] = [
@@ -119,35 +119,4 @@ export function getOAuthCredentialsForProvider(authStorage: AuthStorage, provide
 	}
 	const entries = Array.isArray(providerEntry) ? providerEntry : [providerEntry];
 	return entries.filter((entry): entry is OAuthCredential => entry.type === "oauth");
-}
-
-/**
- * Resolve every configured Codex OAuth account for catalog discovery, refreshing
- * each credential exactly once. Codex `/models` is account-scoped, so discovery
- * must fetch per account and union the results; resolving a single access token
- * (as before) hid models available only through a sibling account (#6265).
- *
- * Returns `null` when any stored account fails to resolve (e.g. a transient
- * refresh failure): the Codex manager is authoritative, so unioning only the
- * accounts that resolved would cache a partial catalog and hide the failed
- * account's models for the cache TTL. Aborting keeps the previous/bundled
- * catalog instead.
- */
-export async function resolveCodexDiscoveryAccounts(
-	authStorage: AuthStorage,
-	resolvedAccessToken: string,
-): Promise<OpenAICodexAccount[] | null> {
-	const accesses = await authStorage.getOAuthAccesses("openai-codex");
-	const accounts: OpenAICodexAccount[] = [];
-	for (const access of accesses) {
-		if (!access.ok) return null;
-		accounts.push({ accessToken: access.accessToken, accountId: access.accountId });
-	}
-	if (!accounts.some(account => account.accessToken === resolvedAccessToken)) {
-		const matchingCredential = getOAuthCredentialsForProvider(authStorage, "openai-codex").find(
-			credential => credential.access === resolvedAccessToken,
-		);
-		accounts.push({ accessToken: resolvedAccessToken, accountId: matchingCredential?.accountId });
-	}
-	return accounts;
 }

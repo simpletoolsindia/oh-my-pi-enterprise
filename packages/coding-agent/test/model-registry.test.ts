@@ -490,62 +490,6 @@ describe("ModelRegistry", () => {
 
 			expect(getModelsForProvider(registry, "anthropic")[0].baseUrl).toBe("https://second-proxy.example.com/v1");
 		});
-
-		test("refresh keeps transport override on built-in provider (#2555 openrouter gateway)", async () => {
-			// Reporter ran `omp` with the auth-gateway broker proxying OpenRouter.
-			// Default model worked; switching via `/model` produced
-			// `404 No route: POST /chat/completions` until restart. Root cause:
-			// background discovery refresh re-fetched the openrouter catalog and
-			// `mergeDiscoveredModel` dropped `transport: pi-native` (raw catalog
-			// rows carry no transport), so the next stream went out as plain
-			// openai-completions to `${baseUrl}/chat/completions` instead of the
-			// gateway's `/v1/pi/stream`.
-			writeRawModelsJson({
-				openrouter: {
-					baseUrl: "http://localhost:4000",
-					apiKey: "gateway-token",
-					transport: "pi-native",
-				},
-			});
-
-			const requestedUrls: string[] = [];
-			const fetchMock: FetchImpl = async input => {
-				const url = input instanceof Request ? input.url : String(input);
-				requestedUrls.push(url);
-				if (url === "http://localhost:4000/models") {
-					return new Response(
-						JSON.stringify({
-							data: [
-								{ id: "openai/gpt-5.4", name: "GPT-5.4", supported_parameters: ["tools"] },
-								{ id: "anthropic/claude-opus-4.6", name: "Claude Opus 4.6", supported_parameters: ["tools"] },
-							],
-						}),
-						{ status: 200, headers: { "Content-Type": "application/json" } },
-					);
-				}
-				throw new Error(`Unexpected URL: ${url}`);
-			};
-
-			const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
-
-			// Pre-refresh: every bundled openrouter model already carries the override.
-			const preRefresh = getModelsForProvider(registry, "openrouter");
-			expect(preRefresh.length).toBeGreaterThan(0);
-			expect(preRefresh.every(m => m.transport === "pi-native")).toBe(true);
-			expect(preRefresh.every(m => m.baseUrl === "http://localhost:4000")).toBe(true);
-
-			await registry.refreshProvider("openrouter", "online");
-			expect(requestedUrls).toContain("http://localhost:4000/models");
-
-			// Post-refresh: every openrouter model — bundled or freshly
-			// discovered — must still route through the pi-native transport.
-			const postRefresh = getModelsForProvider(registry, "openrouter");
-			expect(postRefresh.length).toBeGreaterThan(0);
-			for (const model of postRefresh) {
-				expect(model.transport).toBe("pi-native");
-				expect(model.baseUrl).toBe("http://localhost:4000");
-			}
-		});
 	});
 
 	describe("provider compat overrides", () => {
@@ -1038,29 +982,6 @@ describe("ModelRegistry", () => {
 			expect(model?.baseUrl).toBe("https://my-proxy.example.com/v1");
 		});
 
-		test("discoverable custom-only gpt-5.4 survives refresh", async () => {
-			writeRawModelsJson({
-				"custom-local": {
-					baseUrl: "http://127.0.0.1:8080",
-					apiKey: "TEST_KEY",
-					api: "openai-responses",
-					discovery: { type: "llama.cpp" },
-					models: [{ id: "gpt-5.4" }],
-				},
-			});
-			const fetchMock = mockOpenAiCompatibleModels("http://127.0.0.1:8080/models", ["gpt-5.4"]);
-			const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
-			expect(registry.find("custom-local", "gpt-5.4")?.contextWindow).toBe(1_000_000);
-
-			await registry.refreshProvider("custom-local", "online");
-
-			const model = registry.find("custom-local", "gpt-5.4");
-			expect(model?.contextWindow).toBe(1_000_000);
-			// llama.cpp discovery probes the bare root (`/models`, `/props`); chat
-			// traffic must go to the OpenAI-compatible `/v1` prefix.
-			expect(model?.baseUrl).toBe("http://127.0.0.1:8080/v1");
-		});
-
 		test("discoverable custom compat survives refresh", async () => {
 			writeRawModelsJson({
 				openai: {
@@ -1527,86 +1448,6 @@ describe("ModelRegistry", () => {
 			const model = omitOnCustom.find("ollama", "glm-5.1:cloud");
 			expect(model?.omitMaxOutputTokens).toBe(true);
 			expect(model?.maxTokens).toBe(202752);
-		});
-	});
-
-	describe("github-copilot oauth endpoint alignment", () => {
-		test("getApiKey does not mutate bundled github-copilot baseUrl", async () => {
-			await authStorage.set("github-copilot", [
-				{
-					type: "oauth",
-					access: "ghu_individual_token_123",
-					refresh: "ghu_individual_token_123",
-					expires: Date.now() + 60_000,
-				},
-				{
-					type: "oauth",
-					access: "ghu_enterprise_token_456",
-					refresh: "ghu_enterprise_token_456",
-					expires: Date.now() + 60_000,
-					enterpriseUrl: "ghe.example.com",
-				},
-			]);
-
-			const registry = new ModelRegistry(authStorage, modelsJsonPath);
-			const model = registry.find("github-copilot", "gpt-4o");
-			expect(model).toBeDefined();
-			if (!model) throw new Error("Expected github-copilot/gpt-4o model");
-
-			const initialBaseUrl = model.baseUrl;
-			const firstApiKey = await registry.getApiKey(model);
-			expect(firstApiKey).toBeDefined();
-			const firstParsed = JSON.parse(firstApiKey!) as { token?: string; enterpriseUrl?: string };
-			expect(firstParsed.token).toBe("ghu_individual_token_123");
-			expect(firstParsed.enterpriseUrl).toBeUndefined();
-			const secondApiKey = await registry.getApiKey(model);
-			expect(secondApiKey).toBeDefined();
-			const secondParsed = JSON.parse(secondApiKey!) as { token?: string; enterpriseUrl?: string };
-			expect(secondParsed.token).toBe("ghu_enterprise_token_456");
-			expect(secondParsed.enterpriseUrl).toBe("ghe.example.com");
-			expect(model.baseUrl).toBe(initialBaseUrl);
-		});
-
-		test("refreshProvider uses enterprise Copilot discovery host for peeked credentials", async () => {
-			await authStorage.set("github-copilot", [
-				{
-					type: "oauth",
-					access: "ghu_enterprise_token_456",
-					refresh: "ghu_enterprise_token_456",
-					expires: Date.now() + 60_000,
-					enterpriseUrl: "ghe.example.com",
-				},
-			]);
-
-			const requestedUrls: string[] = [];
-			const fetchMock: FetchImpl = async (input, init) => {
-				const url = input instanceof Request ? input.url : String(input);
-				requestedUrls.push(url);
-				if (url === "https://copilot-api.ghe.example.com/models") {
-					const authHeader =
-						input instanceof Request
-							? input.headers.get("Authorization")
-							: new Headers(init?.headers).get("Authorization");
-					expect(authHeader).toBe("Bearer ghu_enterprise_token_456");
-					return new Response(
-						JSON.stringify({
-							data: [
-								{
-									id: "gpt-5-mini",
-									name: "GPT-5 mini",
-								},
-							],
-						}),
-						{ status: 200, headers: { "Content-Type": "application/json" } },
-					);
-				}
-				throw new Error(`Unexpected URL: ${url}`);
-			};
-
-			const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
-			await registry.refreshProvider("github-copilot", "online");
-			expect(requestedUrls).toContain("https://copilot-api.ghe.example.com/models");
-			expect(requestedUrls).not.toContain("https://api.githubcopilot.com/models");
 		});
 	});
 
@@ -2319,16 +2160,6 @@ describe("ModelRegistry", () => {
 			expect(model!.maxTokens).toBeGreaterThan(10_000);
 		});
 
-		test("loads cached standard provider discovery models on startup", () => {
-			const model = standardCache.find("ollama-cloud", "deepseek-v4-pro");
-			expect(model?.maxTokens).toBe(384_000);
-			expect(model?.omitMaxOutputTokens).toBe(true);
-			const cacheOnlyModel = standardCache.find("ollama-cloud", "future-cloud-only:999b");
-			expect(cacheOnlyModel).toBeDefined();
-			expect(cacheOnlyModel?.maxTokens).toBe(64_000);
-			expect(cacheOnlyModel?.omitMaxOutputTokens).toBe(true);
-		});
-
 		test("loads cached special provider discovery models on startup", () => {
 			expect(specialCache.find("google-antigravity", "gemini-cache-only-flash")?.maxTokens).toBe(8_192);
 			expect(specialCache.find("google-gemini-cli", "gemini-3.5-flash")?.maxTokens).toBe(16_384);
@@ -2352,69 +2183,11 @@ describe("ModelRegistry", () => {
 			expect(getModelsForProvider(litellmStaleNamespaceCache, "litellm-proxy")).toHaveLength(0);
 		});
 
-		test("loads litellm discovery rows cached under the rich-v3 namespace", () => {
-			const model = litellmCurrentNamespaceCache.find("litellm-proxy", "minimax/minimax-m3");
-			expect(model?.name).toBe("MiniMax-M3");
-			expect(model?.provider).toBe("litellm-proxy");
-		});
-
 		test("ignores openai-models-list rows cached under the retired context-v2 namespace", () => {
 			// PR #7584 added server-advertised input-modality parsing; warm v2 rows
 			// pinned vision-capable ids at text-only and must not load.
 			expect(openaiModelsListStaleNamespaceCache.find("stale-openai-proxy", "stale-vlm")).toBeUndefined();
 			expect(getModelsForProvider(openaiModelsListStaleNamespaceCache, "stale-openai-proxy")).toHaveLength(0);
-		});
-
-		test("replaces bundled google-vertex models with authoritative Vertex project discovery", () => {
-			const vertexModels = getModelsForProvider(vertexAuthoritative, "google-vertex");
-			expect(vertexModels.map(model => model.id)).toEqual(["zai-org/glm-4.7-maas"]);
-			expect(vertexAuthoritative.find("google-vertex", "gemini-1.5-pro")).toBeUndefined();
-		});
-
-		test("does not re-add bundled synthetic models after authoritative cache load", () => {
-			const syntheticModels = getModelsForProvider(syntheticCacheLoad, "synthetic");
-			expect(syntheticModels.map(model => model.id)).toEqual(["hf:zai-org/GLM-5.1"]);
-			expect(syntheticCacheLoad.find("synthetic", "hf:moonshotai/Kimi-K2.5")).toBeUndefined();
-		});
-
-		test("does not re-add bundled synthetic models after authoritative refresh", async () => {
-			authStorage.setRuntimeApiKey("synthetic", "synthetic-test-key");
-			const fetchMock = mockOpenAiCompatibleModels("https://api.synthetic.new/openai/v1/models", [
-				"hf:zai-org/GLM-5.1",
-			]);
-			const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
-
-			await registry.refresh("online");
-			const syntheticModels = getModelsForProvider(registry, "synthetic");
-
-			expect(syntheticModels.map(model => model.id)).toEqual(["hf:zai-org/GLM-5.1"]);
-			expect(registry.find("synthetic", "hf:moonshotai/Kimi-K2.5")).toBeUndefined();
-		});
-
-		test("does not re-add bundled Zhipu Coding Plan models after account discovery", async () => {
-			authStorage.setRuntimeApiKey("zhipu-coding-plan", "zhipu-test-key");
-			const fetchMock = mockOpenAiCompatibleModels("https://open.bigmodel.cn/api/coding/paas/v4/models", [
-				"glm-5.1",
-			]);
-			const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
-
-			await registry.refreshProvider("zhipu-coding-plan", "online");
-			const zhipuModels = getModelsForProvider(registry, "zhipu-coding-plan");
-
-			expect(zhipuModels.map(model => model.id)).toEqual(["glm-5.1"]);
-			expect(registry.find("zhipu-coding-plan", "glm-5.2")).toBeUndefined();
-		});
-
-		test("keeps bundled google-vertex fallback when cached project catalog is non-authoritative", () => {
-			const vertexModels = getModelsForProvider(vertexNonAuthoritative, "google-vertex");
-			expect(vertexModels.some(model => model.id === "zai-org/glm-4.7-maas")).toBe(true);
-			expect(vertexModels.some(model => model.id.startsWith("gemini-"))).toBe(true);
-		});
-
-		test("keeps bundled google-vertex fallback when cached project catalog is stale", () => {
-			const vertexModels = getModelsForProvider(vertexStale, "google-vertex");
-			expect(vertexModels.some(model => model.id === "zai-org/glm-4.7-maas")).toBe(true);
-			expect(vertexModels.some(model => model.id.startsWith("gemini-"))).toBe(true);
 		});
 	});
 

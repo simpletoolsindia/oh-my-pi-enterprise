@@ -60,23 +60,11 @@ export const gitHelp = {
 
 export const grepHelp = { description: "Test grep tool" } satisfies CommandMetadata;
 
-export const grievancesHelp = {
-	description: "View, clean, or push reported tool issues (auto-QA grievances)",
-} satisfies CommandMetadata;
-
 export const imagesHelp = {
 	description: "Inspect, diagnose, probe, and purge image publication backends",
 } satisfies CommandMetadata;
 
-export const installHelp = {
-	description: "Install or link an extension package (alias of `plugin install`/`plugin link`)",
-} satisfies CommandMetadata;
-
-export const joinHelp = { description: "Join a shared collab session (same as /join)" } satisfies CommandMetadata;
-
 export const modelsHelp = { description: "List, search, and refresh available models" } satisfies CommandMetadata;
-
-export const pluginHelp = { description: "Manage plugins (install, uninstall, list, etc.)" } satisfies CommandMetadata;
 
 export const psHelp = {
 	description: "List and control daemon-supervised background processes (logs, stop, kill, restart)",
@@ -91,12 +79,6 @@ export const renderHelp = {
 
 export const sayHelp = {
 	description: "Synthesize text with the local TTS engine and play it through the speakers",
-} satisfies CommandMetadata;
-
-export const searchHelp = { description: "Test web search providers" } satisfies CommandMetadata;
-
-export const shareHelp = {
-	description: "Share a saved session via an encrypted link (same as /share)",
 } satisfies CommandMetadata;
 
 export const setupHelp = {
@@ -118,8 +100,6 @@ export const tokenHelp = { description: "Get the API key or OAuth token for a pr
 export const ttsrHelp = {
 	description: "Inspect and test Time-Traveling Stream Rules (TTSR)",
 } satisfies CommandMetadata;
-
-export const updateHelp = { description: "Check for and install updates" } satisfies CommandMetadata;
 
 export const usageHelp = {
 	description: "Show provider usage limits for every authenticated account",

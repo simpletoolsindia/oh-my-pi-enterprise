@@ -13,12 +13,12 @@ afterEach(() => {
 });
 
 describe("configureRecallFeatures", () => {
-	it("keeps all recall gates off by default", () => {
-		expect(polyphonicRecallEnabled({})).toBe(false);
-		expect(enhancedRecallEnabled({})).toBe(false);
-		expect(proactiveLinkingEnabled({})).toBe(false);
-		expect(isEnhancedRecallEnabled({})).toBe(false);
-		expect(isQueryCacheEnabled(true, {})).toBe(false);
+	it("keeps all recall gates on by default", () => {
+		expect(polyphonicRecallEnabled({})).toBe(true);
+		expect(enhancedRecallEnabled({})).toBe(true);
+		expect(proactiveLinkingEnabled({})).toBe(true);
+		expect(isEnhancedRecallEnabled({})).toBe(true);
+		expect(isQueryCacheEnabled(true, {})).toBe(true);
 	});
 
 	it("enables the gates from host configuration when the env vars are unset", () => {
@@ -47,6 +47,7 @@ describe("configureRecallFeatures", () => {
 	});
 
 	it("updates only the flags that are present", () => {
+		configureRecallFeatures({ polyphonicRecall: false, enhancedRecall: false, proactiveLinking: false });
 		configureRecallFeatures({ polyphonicRecall: true });
 		expect(polyphonicRecallEnabled({})).toBe(true);
 		expect(enhancedRecallEnabled({})).toBe(false);

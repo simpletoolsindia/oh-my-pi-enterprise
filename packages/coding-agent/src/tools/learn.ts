@@ -51,7 +51,7 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 	async execute(_id: string, params: LearnParams): Promise<AgentToolResult> {
 		// 1) Persist or queue the lesson to long-term memory (mirrors MemoryRetainTool).
 		const backend = this.session.settings.get("memory.backend");
-		let memoryMessage = "Lesson stored";
+		const memoryMessage = "Lesson stored";
 		if (backend === "mnemopi") {
 			const state = this.session.getMnemopiSessionState?.();
 			if (!state) {

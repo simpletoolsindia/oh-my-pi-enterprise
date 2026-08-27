@@ -3,7 +3,6 @@ import type { ApiKeyResolver, FetchImpl, UsageProvider } from "@oh-my-pi/pi-ai";
 import { registerCustomApi, unregisterCustomApis } from "@oh-my-pi/pi-ai/api-registry";
 import { registerOAuthProvider, unregisterOAuthProvider, unregisterOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
 import type { OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai/oauth/types";
-import { setCodexAttestationProvider } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { getProviderDefinition } from "@oh-my-pi/pi-ai/registry";
 import type {
 	Api,
@@ -23,20 +22,11 @@ import {
 	type ModelRefreshStrategy,
 } from "@oh-my-pi/pi-catalog/model-manager";
 import { getBundledModels, getBundledProviders } from "@oh-my-pi/pi-catalog/models";
-import {
-	googleAntigravityModelManagerOptions,
-	googleGeminiCliModelManagerOptions,
-	isCredentialScopedModelCacheProvider,
-	openaiCodexModelManagerOptions,
-	PROVIDER_DESCRIPTORS,
-	resolveModelCacheProviderId,
-	resolveOllamaModelCacheProviderId,
-} from "@oh-my-pi/pi-catalog/provider-models";
+import { PROVIDER_DESCRIPTORS, resolveModelCacheProviderId } from "@oh-my-pi/pi-catalog/provider-models";
 import { toModelSpec } from "@oh-my-pi/pi-catalog/provider-models/bundled-references";
 import { collapseBuiltModelVariants } from "@oh-my-pi/pi-catalog/variant-collapse";
 import { getAgentDir, isBunTestRuntime, logger, wrapFetchForExtraCa } from "@oh-my-pi/pi-utils";
 import { resolveProviderModelReference } from "../config/model-resolver";
-import { generateCodexAttestation } from "../live/attestation";
 import type { AuthStorage } from "../session/auth-storage";
 import { type ApiKeyResolverModel, type ApiKeyResolverOptions, createApiKeyResolver } from "./api-key-resolver";
 import type { ConfigError, ConfigFile } from "./config-file";
@@ -56,26 +46,12 @@ import {
 	resolveConfigHeaders,
 	resolveConfigValue,
 } from "./model-config-values";
-import {
-	applyLlamaCppQwenThinking,
-	DISCOVERY_DEFAULT_MAX_TOKENS,
-	type DiscoveryContext,
-	type DiscoveryProviderConfig,
-	discoverLlamaCppModelRuntimeMetadata,
-	discoverLmStudioModelRuntimeMetadata,
-	discoverModelsByProviderType,
-	ensureLlamaCppV1BaseUrl,
-	getImplicitOllamaBaseUrl,
-	getOllamaContextLengthOverride,
-	normalizeLiteLLMDiscoveryBaseUrl,
-	normalizeLlamaCppBaseUrl,
-} from "./model-discovery";
+import { type DiscoveryContext, type DiscoveryProviderConfig, discoverModelsByProviderType } from "./model-discovery";
 import {
 	AUTHORITATIVE_RUNTIME_CATALOG_PROVIDERS,
 	applyModelOverride,
 	applyModelPatch,
 	dropProviderModels,
-	type ModelPatch,
 	mergeByModelKey,
 	mergeCompat,
 	mergeDiscoveredModel,
@@ -88,15 +64,12 @@ import {
 	BUILT_IN_DISCOVERY_CACHE_TTL_MS,
 	BUILT_IN_DISCOVERY_NON_AUTHORITATIVE_RETRY_MS,
 	type BuiltInDiscoveryResult,
-	extractGoogleOAuthProjectId,
-	extractGoogleOAuthToken,
 	getOAuthCredentialsForProvider,
 	isAuthenticated,
 	isDiscoveryBearerApiKey,
 	kNoAuth,
 	type ProviderDiscoveryState,
 	RUNTIME_DYNAMIC_MODEL_FETCH_TIMEOUT_MS,
-	resolveCodexDiscoveryAccounts,
 	STARTUP_MODEL_CACHE_PROVIDER_IDS,
 	withRuntimeDynamicModelsTimeout,
 } from "./model-provider-discovery";
@@ -112,10 +85,6 @@ export {
 import { ModelsConfigFile, type ProviderValidationModel, validateProviderConfiguration } from "./models-config";
 import type { ModelOverride, ModelsConfig, ProviderAuthMode } from "./models-config-schema";
 import { type Settings, settings } from "./settings";
-
-// DeviceCheck attestation (`x-oai-attestation`) for ChatGPT-OAuth Codex
-// requests; the pi-ai provider resolves it just-in-time per request.
-setCodexAttestationProvider(generateCodexAttestation);
 
 /**
  * Bedrock guardrail fields to spread onto a model spec, dropping keys that a
@@ -320,9 +289,6 @@ export class ModelRegistry {
 	async hydrateCredentialScopedModelCaches(): Promise<void> {
 		if (!this.#credentialScopedCacheHydration) {
 			const providerIds = new Set<string>();
-			for (const providerId of STARTUP_MODEL_CACHE_PROVIDER_IDS) {
-				if (isCredentialScopedModelCacheProvider(providerId)) providerIds.add(providerId);
-			}
 			this.#credentialScopedCacheHydration = this.#refreshRuntimeDiscoveries("offline", providerIds).catch(error => {
 				logger.debug("credential-scoped model cache hydration failed", {
 					error: error instanceof Error ? error.message : String(error),
@@ -452,98 +418,18 @@ export class ModelRegistry {
 		return this.#findLazyRuntimeDiscovery(provider) !== undefined;
 	}
 
-	#findLazyRuntimeDiscovery(provider: string): DiscoveryProviderConfig | undefined {
-		return this.#discoverableProviders.find(
-			providerConfig =>
-				providerConfig.provider === provider &&
-				(providerConfig.discovery.type === "llama.cpp" || providerConfig.discovery.type === "lm-studio"),
-		);
+	#findLazyRuntimeDiscovery(_provider: string): DiscoveryProviderConfig | undefined {
+		// No configured discovery type exposes lazy-loaded runtime metadata
+		// (llama.cpp/LM Studio, both removed) in this build.
+		return undefined;
 	}
 
 	/**
 	 * Refresh dynamic metadata that can appear only after a local model loads.
-	 *
-	 * llama.cpp exposes `meta.n_ctx` once a lazy-loaded instance is up
-	 * (#3310/#3311); LM Studio exposes `loaded_context_length` once it JIT-loads
-	 * the model on first inference (#9001). Both are captured only as a snapshot
-	 * at discovery time, so re-probe the selected model's native runtime metadata
-	 * and patch its context window to what the backend actually serves.
+	 * No-op in this build: `#findLazyRuntimeDiscovery` never finds a match.
 	 */
 	async refreshSelectedModelMetadata(model: Model<Api>): Promise<Model<Api>> {
-		const discoveryConfig = this.#findLazyRuntimeDiscovery(model.provider);
-		if (!discoveryConfig) {
-			return model;
-		}
-		this.#ensureFullSnapshot();
-		const runtimeMetadata =
-			discoveryConfig.discovery.type === "lm-studio"
-				? await discoverLmStudioModelRuntimeMetadata(
-						model,
-						this.#nonResolvingDiscoveryContext(),
-						discoveryConfig.discovery.timeoutMs,
-					)
-				: await discoverLlamaCppModelRuntimeMetadata(
-						model,
-						this.#nonResolvingDiscoveryContext(),
-						discoveryConfig.discovery.timeoutMs,
-					);
-		if (runtimeMetadata === undefined) {
-			return this.find(model.provider, model.id) ?? model;
-		}
-		const { contextWindow, maxTokens, input } = runtimeMetadata;
-		const current = this.find(model.provider, model.id) ?? model;
-		const override = this.#resolveLiveModelOverride(current);
-		const customModel = this.#resolveLiveCustomModelOverlay(current);
-		const patch: ModelPatch = {};
-		if (
-			contextWindow !== undefined &&
-			override?.contextWindow === undefined &&
-			customModel?.contextWindow === undefined &&
-			current.contextWindow !== contextWindow
-		) {
-			patch.contextWindow = contextWindow;
-		}
-		const effectiveContextWindow =
-			override?.contextWindow ??
-			customModel?.contextWindow ??
-			patch.contextWindow ??
-			current.contextWindow ??
-			contextWindow;
-		if (maxTokens !== undefined && effectiveContextWindow !== undefined) {
-			const effectiveMaxTokens = Math.min(maxTokens, effectiveContextWindow);
-			if (
-				override?.maxTokens === undefined &&
-				customModel?.maxTokens === undefined &&
-				current.maxTokens !== effectiveMaxTokens
-			) {
-				patch.maxTokens = effectiveMaxTokens;
-			}
-		}
-		if (
-			input !== undefined &&
-			override?.input === undefined &&
-			customModel?.input === undefined &&
-			(current.input.length !== input.length || current.input.some((value, index) => value !== input[index]))
-		) {
-			patch.input = input;
-		}
-		if (patch.contextWindow === undefined && patch.maxTokens === undefined && patch.input === undefined) {
-			return current;
-		}
-		const unprojected = resolveProviderModelReference(current.provider, current.id, this.#unprojectedModels);
-		if (unprojected) {
-			const patchedBase = applyModelPatch(unprojected, patch, "merge");
-			this.#unprojectedModels = this.#unprojectedModels.map(candidate =>
-				candidate.provider === unprojected.provider && candidate.id === unprojected.id ? patchedBase : candidate,
-			);
-			this.#models = this.#applyRuntimeModelModifiers(this.#unprojectedModels);
-			return resolveProviderModelReference(current.provider, current.id, this.#models) ?? patchedBase;
-		}
-		const patched = applyModelPatch(current, patch, "merge");
-		this.#models = this.#models.map(candidate =>
-			candidate.provider === current.provider && candidate.id === current.id ? patched : candidate,
-		);
-		return patched;
+		return model;
 	}
 
 	/**
@@ -604,7 +490,6 @@ export class ModelRegistry {
 			modelOverrides = new Map(),
 			keylessProviders = new Set<string>(),
 			discoverableProviders = [],
-			configuredProviders = new Set<string>(),
 			error: configError,
 		} = logger.time("modelRegistry:loadCustomModels", () => this.#loadCustomModels());
 		this.#configError = configError;
@@ -614,13 +499,9 @@ export class ModelRegistry {
 		this.#providerOverrides = overrides;
 		this.#modelOverrides = modelOverrides;
 
-		this.#addImplicitDiscoverableProviders(configuredProviders);
 		const configuredDiscoveryProviders = new Set(this.#discoverableProviders.map(provider => provider.provider));
 		this.#pendingStandardCacheProviders = new Set(
-			STARTUP_MODEL_CACHE_PROVIDER_IDS.filter(
-				providerId =>
-					!configuredDiscoveryProviders.has(providerId) && !isCredentialScopedModelCacheProvider(providerId),
-			),
+			STARTUP_MODEL_CACHE_PROVIDER_IDS.filter(providerId => !configuredDiscoveryProviders.has(providerId)),
 		);
 		this.#cachedDiscoverableModels = logger.time("modelRegistry:loadDiscoverableModels", () =>
 			this.#applyHardcodedModelPolicies(this.#loadCachedDiscoverableModels()),
@@ -1000,12 +881,7 @@ export class ModelRegistry {
 				provider: providerConfig.provider,
 				status: "cached",
 				optional: providerConfig.optional ?? false,
-				stale:
-					providerConfig.discovery.type === "llama.cpp" ||
-					!cache.fresh ||
-					!cache.authoritative ||
-					configStale ||
-					hasUnrestoredHeaders,
+				stale: !cache.fresh || !cache.authoritative || configStale || hasUnrestoredHeaders,
 				fetchedAt: cache.updatedAt,
 				models: models.map(model => model.id),
 			});
@@ -1021,89 +897,19 @@ export class ModelRegistry {
 	}
 
 	#normalizeDiscoverableModels(providerConfig: DiscoveryProviderConfig, models: Model<Api>[]): Model<Api>[] {
-		const withDecoderMetadata =
-			providerConfig.discovery.type === "ollama" ||
-			providerConfig.discovery.type === "llama.cpp" ||
-			providerConfig.discovery.type === "lm-studio"
-				? models.map(model =>
-						buildModel({ ...model, imageInputDecoder: "stb", compat: model.compatConfig } as ModelSpec<Api>),
-					)
-				: models;
-
-		const withRemoteCompaction = providerConfig.remoteCompaction
-			? withDecoderMetadata.map(model =>
-					buildModel({
-						...model,
-						remoteCompaction: mergeProviderRemoteCompactionConfig(
-							model.remoteCompaction,
-							providerConfig.remoteCompaction,
-						),
-						compat: model.compatConfig,
-					} as ModelSpec<Api>),
-				)
-			: withDecoderMetadata;
-
-		if (providerConfig.provider !== "ollama" || providerConfig.api !== "openai-responses") {
-			return withRemoteCompaction;
+		if (!providerConfig.remoteCompaction) {
+			return models;
 		}
-
-		const contextLengthOverride = getOllamaContextLengthOverride();
-		return withRemoteCompaction.map(model => {
-			const normalized =
-				model.api === "openai-completions"
-					? buildModel({
-							...model,
-							api: "openai-responses" as const,
-							compat: model.compatConfig,
-						} as ModelSpec<Api>)
-					: model;
-			if (contextLengthOverride === undefined) {
-				return normalized;
-			}
-			return {
-				...normalized,
-				contextWindow: contextLengthOverride,
-				maxTokens: Math.min(contextLengthOverride, DISCOVERY_DEFAULT_MAX_TOKENS),
-			};
-		});
-	}
-
-	#addImplicitDiscoverableProviders(configuredProviders: Set<string>): void {
-		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
-		const hasOllamaEndpointOverride = Boolean(Bun.env.OLLAMA_BASE_URL?.trim() || Bun.env.OLLAMA_HOST?.trim());
-		if (!configuredProviders.has("ollama") && !disabledProviders.has("ollama")) {
-			this.#discoverableProviders.push({
-				provider: "ollama",
-				api: "openai-responses",
-				baseUrl: getImplicitOllamaBaseUrl(),
-				discovery: { type: "ollama" },
-				optional: !hasOllamaEndpointOverride,
-			});
-			this.#keylessProviders.add("ollama");
-		}
-		if (!configuredProviders.has("llama.cpp") && !disabledProviders.has("llama.cpp")) {
-			this.#discoverableProviders.push({
-				provider: "llama.cpp",
-				api: "openai-responses",
-				baseUrl: Bun.env.LLAMA_CPP_BASE_URL || "http://127.0.0.1:8080",
-				discovery: { type: "llama.cpp" },
-				optional: !Bun.env.LLAMA_CPP_BASE_URL,
-			});
-			// Only mark as keyless if no API key is configured
-			if (!this.authStorage.hasAuth("llama.cpp")) {
-				this.#keylessProviders.add("llama.cpp");
-			}
-		}
-		if (!configuredProviders.has("lm-studio") && !disabledProviders.has("lm-studio")) {
-			this.#discoverableProviders.push({
-				provider: "lm-studio",
-				api: "openai-completions",
-				baseUrl: Bun.env.LM_STUDIO_BASE_URL || "http://127.0.0.1:1234/v1",
-				discovery: { type: "lm-studio" },
-				optional: !Bun.env.LM_STUDIO_BASE_URL,
-			});
-			this.#keylessProviders.add("lm-studio");
-		}
+		return models.map(model =>
+			buildModel({
+				...model,
+				remoteCompaction: mergeProviderRemoteCompactionConfig(
+					model.remoteCompaction,
+					providerConfig.remoteCompaction,
+				),
+				compat: model.compatConfig,
+			} as ModelSpec<Api>),
+		);
 	}
 
 	#loadCustomModels(): CustomModelsResult {
@@ -1172,10 +978,7 @@ export class ModelRegistry {
 			) {
 				const disableStrictCompat = providerConfig.disableStrictTools ? { disableStrictTools: true } : undefined;
 				overrides.set(providerName, {
-					baseUrl:
-						providerConfig.discovery?.type === "litellm"
-							? normalizeLiteLLMDiscoveryBaseUrl(providerConfig.baseUrl)
-							: providerConfig.baseUrl,
+					baseUrl: providerConfig.baseUrl,
 					headers: resolvedProviderHeaders,
 					apiKey: providerConfig.apiKey,
 					authHeader: providerConfig.authHeader,
@@ -1348,20 +1151,11 @@ export class ModelRegistry {
 	}
 
 	#configuredDiscoveryCacheProviderId(providerConfig: DiscoveryProviderConfig): string {
-		if (providerConfig.discovery.type === "ollama") {
-			return resolveOllamaModelCacheProviderId(providerConfig.provider, providerConfig.baseUrl);
-		}
 		if (providerConfig.discovery.type === "openai-models-list") {
 			// context-v3 invalidates rows cached before server-advertised input
 			// modalities were parsed from `/v1/models`; warm v2 rows pinned
 			// vision-capable ids at `input: ["text"]` until a forced refresh.
 			return `${providerConfig.provider}:openai-models-list-context-v3`;
-		}
-		if (providerConfig.discovery.type === "litellm") {
-			// rich-v3 invalidates rows cached before per-model Responses routing;
-			// keep in lockstep with the catalog package's `litellm:rich-vN`
-			// namespace whenever LiteLLM mapping behavior changes.
-			return `${providerConfig.provider}:litellm-rich-v3`;
 		}
 		return providerConfig.provider;
 	}
@@ -1378,9 +1172,7 @@ export class ModelRegistry {
 		const cacheProviderId = this.#configuredDiscoveryCacheProviderId(providerConfig);
 		const cached = readModelCache<Api>(cacheProviderId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
 		const cacheOlderThanConfig = cached !== null && this.#isDiscoveryCacheOlderThanModelsConfig(cached.updatedAt);
-		const bypassFreshCache = providerConfig.discovery.type === "llama.cpp" && strategy === "online-if-uncached";
-		const effectiveStrategy =
-			strategy === "online-if-uncached" && (cacheOlderThanConfig || bypassFreshCache) ? "online" : strategy;
+		const effectiveStrategy = strategy === "online-if-uncached" && cacheOlderThanConfig ? "online" : strategy;
 		const requiresAuth = !this.#keylessProviders.has(providerConfig.provider);
 		if (requiresAuth) {
 			const apiKey = await this.#peekApiKeyForProvider(providerConfig.provider);
@@ -1444,7 +1236,7 @@ export class ModelRegistry {
 			provider: providerId,
 			status,
 			optional: providerConfig.optional ?? false,
-			stale: result.stale || status === "cached" || ((cacheOlderThanConfig || bypassFreshCache) && status !== "ok"),
+			stale: result.stale || status === "cached" || (cacheOlderThanConfig && status !== "ok"),
 			fetchedAt: discoveryError ? cached?.updatedAt : Date.now(),
 			models: result.models.map(model => model.id),
 			error: discoveryError,
@@ -1471,13 +1263,6 @@ export class ModelRegistry {
 				}
 				return this.resolver(provider);
 			},
-		};
-	}
-
-	#nonResolvingDiscoveryContext(): DiscoveryContext {
-		return {
-			fetch: this.#fetch,
-			getBearerApiKeyResolver: async () => undefined,
 		};
 	}
 
@@ -1567,72 +1352,13 @@ export class ModelRegistry {
 		}
 	}
 
-	/**
-	 * Resolve the GCP project id for Gemini CLI quota discovery from the stored
-	 * OAuth credential matched to the token in use. Used only as a fallback for
-	 * the discovery fast path, where `peekApiKey` returns the bare access token
-	 * (stripping the structured identity); matching strictly by `access` avoids
-	 * attaching an unrelated account's project. Workspace/Standard accounts
-	 * require the id because project-less `loadCodeAssist` cannot resolve one.
-	 */
-	#resolveGeminiCliDiscoveryProjectId(oauthToken: string): string | undefined {
-		const credentials = getOAuthCredentialsForProvider(this.authStorage, "google-gemini-cli");
-		const projectId = credentials.find(credential => credential.access === oauthToken)?.projectId?.trim();
-		return projectId ? projectId : undefined;
-	}
-
 	async #collectBuiltInModelManagerOptions(
 		strategy: ModelRefreshStrategy,
 		providerFilter: ReadonlySet<string> | undefined,
 		configuredDiscoveryProviders: ReadonlySet<string>,
 	): Promise<ModelManagerOptions<Api>[]> {
-		const specialProviderDescriptors: Array<{
-			providerId: string;
-			authoritative: boolean;
-			resolveKey: (value: string | undefined) => string | undefined;
-			createOptions: (key: string, raw: string | undefined) => ModelManagerOptions<Api>;
-		}> = [
-			{
-				providerId: "google-antigravity",
-				authoritative: false,
-				resolveKey: extractGoogleOAuthToken,
-				createOptions: oauthToken =>
-					googleAntigravityModelManagerOptions({
-						oauthToken,
-						endpoint: this.#descriptorBaseUrl("google-antigravity"),
-						fetch: this.#fetch,
-					}),
-			},
-			{
-				providerId: "google-gemini-cli",
-				authoritative: false,
-				resolveKey: extractGoogleOAuthToken,
-				createOptions: (oauthToken, raw) =>
-					googleGeminiCliModelManagerOptions({
-						oauthToken,
-						projectId: extractGoogleOAuthProjectId(raw) ?? this.#resolveGeminiCliDiscoveryProjectId(oauthToken),
-						endpoint: this.#descriptorBaseUrl("google-gemini-cli"),
-						fetch: this.#fetch,
-					}),
-			},
-			{
-				providerId: "openai-codex",
-				authoritative: true,
-				resolveKey: value => value,
-				createOptions: accessToken =>
-					openaiCodexModelManagerOptions({
-						resolveAccounts: () => resolveCodexDiscoveryAccounts(this.authStorage, accessToken),
-						fetch: this.#fetch,
-					}),
-			},
-		];
 		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
 		const standardProviderDescriptors = PROVIDER_DESCRIPTORS.filter(descriptor => {
-			if (disabledProviders.has(descriptor.providerId)) return false;
-			if (configuredDiscoveryProviders.has(descriptor.providerId)) return false;
-			return providerFilter ? providerFilter.has(descriptor.providerId) : true;
-		});
-		const enabledSpecialProviderDescriptors = specialProviderDescriptors.filter(descriptor => {
 			if (disabledProviders.has(descriptor.providerId)) return false;
 			if (configuredDiscoveryProviders.has(descriptor.providerId)) return false;
 			return providerFilter ? providerFilter.has(descriptor.providerId) : true;
@@ -1648,26 +1374,11 @@ export class ModelRegistry {
 				);
 			}),
 		);
-		const specialKeys = await Promise.all(
-			enabledSpecialProviderDescriptors.map(descriptor =>
-				this.#resolveBuiltInDiscoveryApiKey(
-					descriptor.providerId,
-					strategy,
-					descriptor.providerId,
-					descriptor.authoritative,
-				),
-			),
-		);
 		const options: ModelManagerOptions<Api>[] = [];
 		for (let i = 0; i < standardProviderDescriptors.length; i++) {
 			const descriptor = standardProviderDescriptors[i];
 			const apiKey = standardProviderKeys[i];
-			const hasExplicitVllmConfig =
-				descriptor.providerId === "vllm" &&
-				(this.#runtimeProviderOverrides.has(descriptor.providerId) ||
-					this.#providerOverrides.has(descriptor.providerId) ||
-					this.#keylessProviders.has(descriptor.providerId));
-			if (isAuthenticated(apiKey) || descriptor.allowUnauthenticated || hasExplicitVllmConfig) {
+			if (isAuthenticated(apiKey) || descriptor.allowUnauthenticated) {
 				const discoveryConfig = {
 					apiKey: isDiscoveryBearerApiKey(apiKey) ? apiKey : undefined,
 					baseUrl: this.#descriptorBaseUrl(descriptor.providerId),
@@ -1678,15 +1389,6 @@ export class ModelRegistry {
 					discoveryConfig;
 				options.push(descriptor.createModelManagerOptions(preparedConfig));
 			}
-		}
-
-		for (let i = 0; i < enabledSpecialProviderDescriptors.length; i++) {
-			const descriptor = enabledSpecialProviderDescriptors[i];
-			const key = descriptor.resolveKey(specialKeys[i]);
-			if (!isAuthenticated(key)) {
-				continue;
-			}
-			options.push(descriptor.createOptions(key, specialKeys[i]));
 		}
 		// Append runtime model managers registered by extensions via fetchDynamicModels.
 		for (const { options: managerOpts } of this.#runtimeModelManagers.values()) {
@@ -1739,28 +1441,11 @@ export class ModelRegistry {
 		});
 	}
 
-	// #applyLlamaCppModelFixups is the outermost transform for llama.cpp-provider
-	// models, after discovery merges, cache fallbacks, and provider/transport
-	// overrides have run. It applies Qwen-specific fixes (api, reasoning, compat)
-	// and ensures all non-transport models have the `/v1` prefix in their baseUrl,
-	// even when a configured override or stale cache row would strip it.
+	// No configured discovery type needs llama.cpp-specific Qwen/baseUrl fixups
+	// in this build (llama.cpp discovery was removed); kept as a passthrough so
+	// call sites don't need to change.
 	#applyLlamaCppModelFixups(models: Model<Api>[]): Model<Api>[] {
-		const llamaCppProviders = new Set<string>();
-		for (const provider of this.#discoverableProviders) {
-			if (provider.discovery.type === "llama.cpp") llamaCppProviders.add(provider.provider);
-		}
-		if (llamaCppProviders.size === 0) return models;
-		return models.map(model => {
-			if (!llamaCppProviders.has(model.provider)) return model;
-			const withFixups = applyLlamaCppQwenThinking(model);
-			if (!withFixups.transport && !withFixups.baseUrl.endsWith("/v1")) {
-				return buildModel({
-					...withFixups,
-					baseUrl: ensureLlamaCppV1BaseUrl(normalizeLlamaCppBaseUrl(withFixups.baseUrl)),
-				});
-			}
-			return withFixups;
-		});
+		return models;
 	}
 
 	#mergeProviderOverride(baseOverride: ProviderOverride | undefined, override: ProviderOverride): ProviderOverride {
@@ -1834,22 +1519,6 @@ export class ModelRegistry {
 			if (!override) return model;
 			return this.#applyProviderTransportOverrideToModel(model, override);
 		});
-	}
-	#resolveLiveModelOverride(model: Model<Api>): ModelOverride | undefined {
-		const providerOverrides = this.#modelOverrides.get(model.provider);
-		if (!providerOverrides) return undefined;
-		return resolveModelOverrideWithAliases(
-			providerOverrides,
-			model,
-			(provider, id) => this.find(provider, id) !== undefined,
-		);
-	}
-
-	#resolveLiveCustomModelOverlay(model: Model<Api>): CustomModelOverlay | undefined {
-		return (
-			this.#customModelOverlays.find(overlay => overlay.provider === model.provider && overlay.id === model.id) ??
-			this.#runtimeModelOverlays.find(overlay => overlay.provider === model.provider && overlay.id === model.id)
-		);
 	}
 
 	#applyModelOverrides(models: Model<Api>[], overrides: Map<string, Map<string, ModelOverride>>): Model<Api>[] {

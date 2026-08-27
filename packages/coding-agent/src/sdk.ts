@@ -115,7 +115,6 @@ import {
 	setActiveSkills,
 } from "./extensibility/skills";
 import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./extensibility/slash-commands";
-import type { HindsightSessionState } from "./hindsight/state";
 import { LocalProtocolHandler, type LocalProtocolOptions } from "./internal-urls";
 import { setSharedLspEnabled } from "./lsp/client";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "./lsp/startup-events";
@@ -206,7 +205,6 @@ import {
 	EvalTool,
 	GlobTool,
 	GrepTool,
-	getSearchTools,
 	HIDDEN_TOOLS,
 	isMountableUnderXdev,
 	type LspStartupServerInfo,
@@ -217,7 +215,6 @@ import {
 	supportsExternalThinking,
 	type Tool,
 	type ToolSession,
-	WebSearchTool,
 	WriteTool,
 	warmupLspServers,
 	xdevDocsAll,
@@ -229,7 +226,6 @@ import { isIrcEnabled } from "./tools/hub";
 import { getImageGenTools } from "./tools/image-gen";
 import { wrapToolWithMetaNotice } from "./tools/output-meta";
 import { isFilesystemSourcePath } from "./tools/path-utils";
-import { isAutoQaEnabled } from "./tools/report-tool-issue";
 import { queueResolveHandler } from "./tools/resolve";
 import { USER_TODO_EDIT_CUSTOM_TYPE } from "./tools/todo";
 import { ttsTool } from "./tools/tts";
@@ -528,8 +524,6 @@ export interface CreateAgentSessionOptions {
 	requireYieldTool?: boolean;
 	/** Task recursion depth (for subagent sessions). Default: 0 */
 	taskDepth?: number;
-	/** Parent Hindsight state to alias for subagent memory tools. */
-	parentHindsightSessionState?: HindsightSessionState;
 	/** Parent Mnemopi state to alias for subagent memory tools. */
 	parentMnemopiSessionState?: MnemopiSessionState;
 	/** Pre-allocated agent identity for IRC routing. Default: "Main" for top-level, parentTaskPrefix-derived for sub. */
@@ -677,7 +671,6 @@ export {
 	HIDDEN_TOOLS,
 	ReadTool,
 	type ToolSession,
-	WebSearchTool,
 	WriteTool,
 };
 
@@ -1764,7 +1757,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				session ? session.trackEvalExecution(execution, abortController) : execution,
 			getSessionId: () => sessionManager.getSessionId?.() ?? null,
 			isDisposed: () => session?.isDisposed ?? false,
-			getHindsightSessionState: () => session?.getHindsightSessionState(),
 			getMnemopiSessionState: () => session?.getMnemopiSessionState(),
 			getAgentId: () => resolvedAgentId,
 			getToolByName: name => session?.getToolByName(name),
@@ -1997,11 +1989,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 
 			if (settings.get("speechgen.enabled")) {
 				customTools.push(ttsTool as unknown as CustomTool);
-			}
-
-			// Add web search tools
-			if (options.toolNames?.includes("web_search")) {
-				customTools.push(...getSearchTools());
 			}
 
 			// Discover custom tools from `.omp/tools/`, `.claude/tools/`, plugins, etc.
@@ -3050,7 +3037,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 					options.spawns ?? "*",
 				),
 				taskIrcEnabled: !restrictToolNames && isIrcEnabled(settings, options.taskDepth ?? 0),
-				autoQaEnabled: !restrictToolNames && isAutoQaEnabled(settings),
 				secretsEnabled,
 				workspaceTree: workspaceTreePromise,
 				includeWorkspaceTree,
@@ -3926,7 +3912,6 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				modelRegistry,
 				agentDir,
 				taskDepth,
-				parentHindsightSessionState: options.parentHindsightSessionState,
 				parentMnemopiSessionState: options.parentMnemopiSessionState,
 			});
 		};

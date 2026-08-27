@@ -96,7 +96,6 @@ function makeHarness(options: { renderInitialMessages?: () => void | Promise<voi
 		updateEditorBorderColor() {},
 		ui: { requestRender() {} },
 		showStatus() {},
-		collabGuest: undefined,
 	} as unknown as InteractiveModeContext;
 
 	const registry = new AgentRegistry();

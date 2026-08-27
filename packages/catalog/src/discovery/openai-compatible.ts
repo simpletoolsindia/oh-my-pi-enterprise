@@ -16,6 +16,12 @@ const MODELS_PATH = "/models";
  */
 export const DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS = 10_000;
 
+/** Fallback context window assumed for a discovered model when the endpoint reports none. */
+export const OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW = 128_000;
+
+/** Fallback max output tokens assumed for a discovered model when the endpoint reports none. */
+export const OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS = 32_768;
+
 /**
  * Uses a cancellable timer rather than the native abort-timeout helper so
  * successful fast discovery requests do not leave armed timeout signals for
