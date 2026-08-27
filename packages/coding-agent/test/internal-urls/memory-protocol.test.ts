@@ -405,7 +405,6 @@ async function withMnemopiSession(fn: (fixture: MnemopiFixture) => Promise<void>
 			bank: "test-bank",
 			autoRecall: false,
 			autoRetain: false,
-			polyphonicRecall: false,
 			enhancedRecall: false,
 			proactiveLinking: false,
 			retainEveryNTurns: 3,

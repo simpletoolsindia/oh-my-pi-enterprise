@@ -63,7 +63,6 @@ function makeMnemopiConfig(
 		bank: "test-bank",
 		autoRecall: true,
 		autoRetain: true,
-		polyphonicRecall: false,
 		enhancedRecall: false,
 		proactiveLinking: false,
 		retainEveryNTurns: 3,
