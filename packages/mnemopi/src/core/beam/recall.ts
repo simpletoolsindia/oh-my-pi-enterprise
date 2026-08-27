@@ -5,6 +5,7 @@ import { adjustWeights, classifyIntent } from "../query-intent";
 import { getSynonyms, normalizeQuery, STOP_WORDS as QUERY_STOP_WORDS } from "../synonyms";
 import { extractTemporal } from "../temporal-parser";
 import { cosineSimilarity } from "../vector-math";
+import { weibullBoost } from "../weibull";
 import type { BeamMemoryState, RecallEnhancedOptions, RecallOptions, RecallResult } from "./types";
 
 type DbValue = string | number | null | Uint8Array;
@@ -385,15 +386,6 @@ function lexicalRelevance(queryTokens: readonly string[], content: string, norma
 	return clamp01((exact + partial * 0.5) / queryTokens.length);
 }
 
-function recencyDecay(timestamp: unknown, halfLifeHours = 72): number {
-	const raw = asString(timestamp);
-	if (raw.length === 0) return 0;
-	const parsed = Date.parse(raw);
-	if (!Number.isFinite(parsed)) return 0;
-	const ageHours = Math.max(0, (Date.now() - parsed) / 3_600_000);
-	return Math.exp(-ageHours / Math.max(halfLifeHours, 0.001));
-}
-
 export function parseQueryTime(value: RecallOptionsInternal["queryTime"]): Date {
 	if (value == null) return new Date();
 	if (value instanceof Date) {
@@ -720,10 +712,16 @@ function scoreCandidate(
 	if (lexical < minRel && candidate.signals.dense < 0.65) return null;
 	const [vecWeight, ftsWeight, importanceWeight] = weights;
 	const importance = asNumber(candidate.row.importance, 0.5);
-	const decay =
-		options.queryTime == null
-			? recencyDecay(candidate.row.timestamp, 72)
-			: temporalBoost(candidate.row.timestamp, parseQueryTime(options.queryTime), 72);
+	// Per-memory-type decay (profile/preference/fact persist far longer in
+	// ranking than event/request noise) instead of one flat half-life for
+	// every kind of memory — a durable `learn`-tool lesson (type "fact",
+	// ~30-day half-life) should not fade at the same rate as a transient
+	// conversational turn.
+	const decay = weibullBoost(
+		asString(candidate.row.timestamp),
+		options.queryTime == null ? new Date() : parseQueryTime(options.queryTime),
+		asString(candidate.row.memory_type) || "general",
+	);
 	const keyword = Math.max(lexical, candidate.signals.fts * 0.6);
 	let baseScore: number;
 	if (candidate.tierLabel === "episodic") {
