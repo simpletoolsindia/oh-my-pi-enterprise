@@ -367,7 +367,13 @@ providers:
         name: MiniMax M3
         contextWindow: 100000
         maxTokens: 32000
+      - id: qwen3-coder
+        name: Qwen3 Coder
+        contextWindow: 128000
+        maxTokens: 32000
 ```
+
+`models` is a list — add as many entries as your server exposes; every one shows up as its own selectable model under the provider. The self-extracting installer (`scripts/build-installer.sh`) also prompts for as many models as you want during first-time setup.
 
 Run `omp models spark` to verify discovery. Then run `omp setup` and choose the model in the default-model step, or open `/model` in a session and assign it to the `default` role.
 

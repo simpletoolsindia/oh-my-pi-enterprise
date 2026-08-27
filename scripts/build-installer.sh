@@ -68,28 +68,54 @@ echo ""
 MODELS_DIR="$HOME/.omp/agent"
 MODELS_FILE="$MODELS_DIR/models.yml"
 
+# Escapes `\` and `"` so an interpolated value is safe inside a YAML
+# double-quoted scalar (server URLs/keys/model ids can contain `:` or `#`,
+# which break unquoted YAML scalars).
+yaml_quote() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    printf '"%s"' "$s"
+}
+
 if [ -f "$MODELS_FILE" ]; then
     echo "A config already exists at $MODELS_FILE — leaving it untouched."
 else
     echo "Set up your custom OpenAI-compatible model provider."
     read -r -p "Server URL (e.g. https://api.example.com/v1): " PROVIDER_URL
-    read -r -p "Model name (as your server calls it): " PROVIDER_MODEL
     read -r -s -p "API key: " PROVIDER_KEY
     echo ""
 
+    MODEL_IDS=()
+    while :; do
+        read -r -p "Model name (as your server calls it): " MODEL_ID
+        if [ -z "$MODEL_ID" ]; then
+            echo "Model name cannot be empty." >&2
+            continue
+        fi
+        MODEL_IDS+=("$MODEL_ID")
+        read -r -p "Add another model? [y/N]: " ADD_MORE
+        case "$ADD_MORE" in
+            [Yy]*) continue ;;
+            *) break ;;
+        esac
+    done
+
     mkdir -p "$MODELS_DIR"
-    cat > "$MODELS_FILE" <<EOF
-providers:
-  custom:
-    baseUrl: $PROVIDER_URL
-    apiKey: $PROVIDER_KEY
-    api: openai-completions
-    models:
-      - id: $PROVIDER_MODEL
-        name: $PROVIDER_MODEL
-        api: openai-completions
-EOF
-    echo "Wrote $MODELS_FILE"
+    {
+        echo "providers:"
+        echo "  custom:"
+        echo "    baseUrl: $(yaml_quote "$PROVIDER_URL")"
+        echo "    apiKey: $(yaml_quote "$PROVIDER_KEY")"
+        echo "    api: openai-completions"
+        echo "    models:"
+        for MODEL_ID in "${MODEL_IDS[@]}"; do
+            echo "      - id: $(yaml_quote "$MODEL_ID")"
+            echo "        name: $(yaml_quote "$MODEL_ID")"
+            echo "        api: openai-completions"
+        done
+    } > "$MODELS_FILE"
+    echo "Wrote $MODELS_FILE with ${#MODEL_IDS[@]} model(s)."
 fi
 
 echo ""
