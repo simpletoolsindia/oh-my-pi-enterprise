@@ -67,6 +67,7 @@ echo ""
 
 MODELS_DIR="$HOME/.omp/agent"
 MODELS_FILE="$MODELS_DIR/models.yml"
+CONFIG_FILE="$MODELS_DIR/config.yml"
 
 # Escapes `\` and `"` so an interpolated value is safe inside a YAML
 # double-quoted scalar (server URLs/keys/model ids can contain `:` or `#`,
@@ -134,6 +135,60 @@ else
         done
     } > "$MODELS_FILE"
     echo "Wrote $MODELS_FILE with ${#MODEL_IDS[@]} model(s)."
+
+    # --- Memory embeddings (optional, configured independently of chat) ------
+    # omp's memory works either way: with embeddings it can recall a lesson
+    # phrased differently from your query (semantic); without them it falls
+    # back to local full-text search (keyword). Declining also skips a large
+    # on-demand download of the on-device embedding runtime, which is why the
+    # "no" branch writes the setting explicitly rather than leaving it unset.
+    echo ""
+    echo "Memory embeddings (optional) — improves how well the agent recalls past lessons."
+    echo "Needs an OpenAI-compatible /v1/embeddings endpoint; it can be a different"
+    echo "server than the chat model above. Answer 'n' to use local keyword search instead."
+    read -r -p "Configure an embeddings endpoint? [y/N]: " WANT_EMB
+    case "$WANT_EMB" in
+        [Yy]*)
+            read -r -p "Embeddings URL [$PROVIDER_URL]: " EMB_URL
+            EMB_URL="${EMB_URL:-$PROVIDER_URL}"
+            read -r -s -p "Embeddings API key (blank = reuse the key above): " EMB_KEY
+            echo ""
+            EMB_KEY="${EMB_KEY:-$PROVIDER_KEY}"
+            read -r -p "Embeddings model (e.g. text-embedding-3-small): " EMB_MODEL
+
+            printf '%s' "Testing embeddings endpoint... "
+            if curl -fsS --max-time 15 -X POST "$EMB_URL/embeddings" \
+                -H "Authorization: Bearer $EMB_KEY" \
+                -H "Content-Type: application/json" \
+                -d "{\"model\":\"$EMB_MODEL\",\"input\":\"omp installer connectivity probe\"}" \
+                >/dev/null 2>&1; then
+                echo "connected."
+            else
+                echo "could not reach $EMB_URL/embeddings with that key/model."
+                echo "Saving it anyway — memory falls back to keyword search until it works,"
+                echo "and you can fix it later in omp via /settings → Memory."
+            fi
+
+            mkdir -p "$MODELS_DIR"
+            {
+                echo "mnemopi:"
+                echo "  noEmbeddings: false"
+                echo "  embeddingApiUrl: $(yaml_quote "$EMB_URL")"
+                echo "  embeddingApiKey: $(yaml_quote "$EMB_KEY")"
+                echo "  embeddingModel: $(yaml_quote "$EMB_MODEL")"
+            } >> "$CONFIG_FILE"
+            echo "Wrote embeddings config to $CONFIG_FILE"
+            ;;
+        *)
+            mkdir -p "$MODELS_DIR"
+            {
+                echo "mnemopi:"
+                echo "  noEmbeddings: true"
+            } >> "$CONFIG_FILE"
+            echo "Embeddings off — memory will use local keyword search."
+            echo "You can turn them on later in omp via /settings → Memory."
+            ;;
+    esac
 fi
 
 echo ""

@@ -1,54 +1,37 @@
 # omp — self-hosted coding agent
 
-A terminal coding agent, locked down for internal/enterprise use: **one OpenAI-compatible provider you point it at**, no telemetry, no update checks, no remote tracking, no other API ever called. Everything — code understanding, memory, subagents — runs locally against your own model server.
+A terminal coding agent, locked down for internal/enterprise use: **one OpenAI-compatible provider you point it at**, no telemetry, no update checks, no remote tracking, no other API ever called. Code understanding, memory, and subagents all run locally against your own model server.
 
 Fork of [oh-my-pi](https://github.com/can1357/oh-my-pi) (itself a fork of [Pi](https://github.com/badlogic/pi-mono) by [@mariozechner](https://github.com/mariozechner)), stripped down and re-pointed at a single self-hosted provider.
 
-## What's different from upstream
+---
 
-- **One provider, not sixty.** No OAuth logins, no per-provider API keys, no provider marketplace/catalog fetched from anywhere. You configure exactly one OpenAI-compatible `baseUrl` + `apiKey`, with as many models under it as your server exposes.
-- **No remote anything.** No usage/telemetry reporting, no version/update checks, no release-notes fetch, no crash reporting. Nothing phones home.
-- **Fully offline install.** The self-extracting installer embeds the compiled binary; it needs no internet access and no artifact server to run.
-- **Local code understanding.** A built-in code graph indexes your repo (TypeScript/JavaScript/TSX, Python, YAML, CSS, HTML, Jinja) using the bundled native tree-sitter engine and a local SQLite index — no external CLI, no network call.
-- **Local, persistent self-learning.** The agent remembers durable facts, project conventions, and corrected mistakes across sessions in a local memory store, and reuses them automatically in future conversations — see [Self-learning](#self-learning) below.
+## Quick start
 
-## Install
-
-### Quick start (end users)
-
-Someone on your team already built `omp-install.sh` (see **Building the installer** below) and handed it to you. To install:
+Someone on your team builds `omp-install.sh` once (see [Building the installer](#building-the-installer)) and hands you the file. To install:
 
 ```sh
 bash omp-install.sh
 ```
 
-It will:
+The installer walks you through everything:
 
-1. Install the `omp` binary to `~/.local/bin` (or `$PI_INSTALL_DIR` if you set it) and confirm it starts.
-2. Ask for your model server's **URL**, **API key**, and one or more **model names** — then immediately test the connection and let you fix a typo before writing anything.
-3. Write `~/.omp/agent/models.yml` and add `~/.local/bin` to your `PATH` if it isn't already there.
+1. **Installs the binary** to `~/.local/bin/omp` and confirms it starts.
+2. **Asks for your model server** — URL, API key, and one or more model names. It tests the connection immediately so a typo surfaces now, not on your first prompt.
+3. **Asks about memory embeddings** (optional — see [Memory embeddings](#memory-embeddings)).
+4. **Adds `~/.local/bin` to your `PATH`** if it isn't already there.
 
-Then just run:
+Then:
 
 ```sh
 omp
 ```
 
-Re-running the installer later is safe — if `~/.omp/agent/models.yml` already exists, it's left untouched. To redo setup (new server, new key, more models), delete that file first and re-run the installer, or hand-edit the YAML directly (see [Configuring models](#configuring-models) below).
+Re-running the installer is safe — if `~/.omp/agent/models.yml` already exists it's left untouched. To redo setup, delete that file and run it again.
 
-> Currently supports **macOS on Apple Silicon (darwin-arm64)** only.
+> Currently supports **macOS on Apple Silicon (darwin-arm64)**.
 
-### Building the installer (once, per release)
-
-Requires the full dev toolchain (Bun + Rust):
-
-```sh
-bun setup                                   # installs workspaces + builds the native addon
-bun run --cwd packages/coding-agent build   # compiles the omp binary
-bash scripts/build-installer.sh             # bundles it into one self-extracting file
-```
-
-This produces `packages/coding-agent/dist/omp-install.sh` — a single file with the compiled binary embedded (base64), so it needs no internet access and no internal artifact server to run on a target machine. Copy that one file to whoever needs `omp` and have them run it as shown above.
+---
 
 ## Configuring models
 
@@ -71,62 +54,139 @@ providers:
         maxTokens: 32000
 ```
 
-`models` is a list — add as many entries as your server exposes; every one becomes its own selectable model. Run `omp models custom` to verify discovery, then open `/model` in a session (or `omp setup`) to assign one to a role. To preconfigure the default without the picker, add to `~/.omp/agent/config.yml`:
+`models` is a list — add as many as your server exposes; each becomes its own selectable model. Verify with `omp models ls`, then pick one with `/model` inside a session.
+
+Roles route work by intent: `default` for normal turns, `smol` for cheap subagent fan-out, `slow` for deep reasoning, `plan`, `commit`, `vision`, `designer`, `task`, `advisor`, `tiny`. You don't have to configure any of them — anything unset falls back to an available model. To pin one anyway, add to `~/.omp/agent/config.yml`:
 
 ```yaml
 modelRoles:
   default: custom/your-model-id
+  smol: custom/a-smaller-faster-model
 ```
 
-Roles route work by intent: `default` for normal turns, `smol` for cheap subagent fan-out, `slow` for deep reasoning, `plan` for plan mode, `commit` for changelogs, plus `vision`, `designer`, `task`, `advisor`, and `tiny`. Cycle through configured models for the active role with `Ctrl+P`, or swap mid-session with `/model`.
+---
+
+## Memory embeddings
+
+The agent remembers lessons across sessions (see [Self-learning](#self-learning)). How it *finds* them again depends on whether embeddings are configured:
+
+| | How recall works | Needs |
+| --- | --- | --- |
+| **Embeddings off** (default) | Local full-text keyword search | Nothing |
+| **Embeddings on** | Semantic search — finds a lesson even when worded differently from your query | An OpenAI-compatible `/v1/embeddings` endpoint |
+
+**You do not need embeddings.** With them off, memory still works — it just matches on words rather than meaning. Nothing crashes, and no large model download happens.
+
+### Turning embeddings on or off in the TUI
+
+Inside a session, type:
+
+```
+/settings
+```
+
+Go to the **Memory** tab → **Mnemopi** group. The relevant settings:
+
+| Setting | What it does |
+| --- | --- |
+| **Mnemopi Disable Embeddings** | `true` = keyword search only. `false` = use the endpoint below. |
+| **Mnemopi Embedding API URL** | Your `/v1`-style base URL. Can be a **different server** from your chat model. |
+| **Mnemopi Embedding API Key** | Key for that endpoint. |
+| **Mnemopi Embedding Model** | e.g. `text-embedding-3-small`, `nomic-embed-text`. |
+
+Changes save immediately. (If the Memory tab is empty, memory is off entirely — set **Memory Backend** to `mnemopi` first.)
+
+### Or configure it in a file
+
+`~/.omp/agent/config.yml`:
+
+```yaml
+mnemopi:
+  noEmbeddings: false                              # true = keyword search only
+  embeddingApiUrl: "https://embeddings.internal/v1" # may differ from your chat server
+  embeddingApiKey: "your-key"
+  embeddingModel: "text-embedding-3-small"
+```
+
+To turn embeddings off, that's the whole config:
+
+```yaml
+mnemopi:
+  noEmbeddings: true
+```
+
+**If the endpoint is wrong, unreachable, or removed later, the agent does not crash** — it logs and falls back to keyword search. You can fix it whenever.
+
+---
 
 ## Self-learning
 
-The agent builds up project- and preference-specific memory over time, entirely on-disk, using [mnemopi](docs/memory.md):
+The agent builds project- and preference-specific memory over time, entirely on disk, via [mnemopi](docs/memory.md):
 
-- **Durable facts and corrections.** When the agent learns something worth keeping — a project convention, a non-obvious fix, or a mistake and the correction that actually worked — it records it with the `learn` tool so it doesn't repeat the same mistake in a later session.
-- **Reusable procedures.** Repeatable multi-step workflows get codified as managed skills (`manage_skill`), which resurface automatically in future sessions like any other skill.
-- **Polyphonic recall.** Retrieval fuses four signals — vector similarity, an entity/fact graph, extracted structured facts, and recency — via reciprocal rank fusion, so relevant memories surface even when the query doesn't share exact wording with what was stored. Recency itself is weighted per memory type, so a durable lesson persists in ranking far longer than a one-off conversational aside.
-- **Automatic, not manual.** Recall runs at the start of a session and again around context compaction; retention happens periodically as the conversation progresses. No slash command required for the common case.
+- **Learns from mistakes.** When a tool call or approach fails and a correction works, it records the failure *and* the fix with the `learn` tool, weighted higher than a routine note so it outranks ordinary memories next time it's relevant.
+- **Captures on friction, not volume.** A capture turn triggers after a turn where something actually errored — not merely a long turn — so what gets stored is corrective rather than generic.
+- **Reusable procedures become skills.** Repeatable workflows get written as managed skills that resurface automatically in later sessions.
+- **Reinforces on repetition.** Re-learning the same lesson (in any session, and past differences in wording or punctuation) strengthens the existing memory instead of creating a duplicate.
+- **Automatic.** Recall runs at session start and around context compaction; retention happens as the conversation progresses. No slash command needed for the common case.
 
-All of this is local SQLite under `~/.omp/agent/memories/` (or your project's `.omp/`) — nothing is sent anywhere to make it work.
+All local SQLite under `~/.omp/agent/memories/`. Nothing is sent anywhere.
+
+---
 
 ## Local code graph
 
-Instead of shelling out to an external indexer, `omp` ships a lightweight, in-process code graph (`packages/coding-agent/src/utils/local-code-graph.ts`) built on the same native tree-sitter engine used by `ast_grep`:
+An in-process code graph built on the bundled native tree-sitter engine and `bun:sqlite` — no external indexer, no network:
 
-- Covers TypeScript/JavaScript/TSX and Python function/class definitions and call sites, plus the native reuse construct for a few non-code formats: YAML anchors/aliases, CSS custom properties, HTML id/href/for/aria references, and Jinja macros.
-- Builds lazily on first use per project (a one-time scan, shown as a startup progress overlay), stored at `.omp/codegraph.db`.
-- Ask "who calls this," "what does this depend on," or "what breaks if I change this" and the agent queries the graph instead of grepping for text.
+- Covers **TypeScript/JavaScript/TSX** and **Python** definitions and call sites, plus each format's native reuse construct for **YAML** (anchors/aliases), **CSS** (custom properties / `var()`), **HTML** (`id` ↔ `href`/`for`/`aria-labelledby`), and **Jinja** (macros).
+- Answers "who calls this", "what does this depend on", "what breaks if I change this" by querying the graph instead of grepping.
+- Indexes on first launch per project, stored at `.omp/codegraph.db`. On a large repo this takes a while (~40s for ~4,000 files) — **press `Esc` to skip it** and drop straight into the session; the index is then rebuilt the first time the tool is actually used.
 
-See [docs/tools/codegraph.md](docs/tools/codegraph.md) for the full op reference and honest limitations (name/AST-based, not a full compiler).
+Full reference and honest limitations (name/AST-based, not a compiler) in [docs/tools/codegraph.md](docs/tools/codegraph.md).
+
+---
 
 ## Subagents
 
-Large tasks get automatically decomposed and fanned out to subagents rather than run as one long linear turn — `task.eager` defaults to "preferred." Subagents get a filtered, purpose-scoped toolset and their own context budget, then report back a summary. See [docs/task-agent-discovery.md](docs/task-agent-discovery.md).
+Large tasks are decomposed and fanned out to subagents rather than run as one long linear turn. Each gets a purpose-scoped toolset and its own context budget, then reports back a summary. See [docs/task-agent-discovery.md](docs/task-agent-discovery.md).
 
-## What's still in the box
+---
 
-The provider layer and remote-facing features were cut; the actual coding-agent surface wasn't:
+## What else is in the box
 
-- **Editing** — line-anchored and hash-anchored edits, AST-aware structural edits (`ast_edit`, `ast_grep`), conflict-aware writes, checkpoints (undo across a whole turn).
-- **Shell** — persistent interactive bash sessions, PTY support, timeout/output handling tuned for long-running commands.
-- **LSP & DAP** — real language-server operations (go-to-definition, references, diagnostics, rename, …) and a real debugger, not text heuristics.
-- **Git & GitHub** — commit/PR/review workflows, `gh` wired in as a first-class tool, conflict resolution.
-- **Review** — structured code review with prioritized, verdict-bearing findings.
-- **Security scanning**, **PDF/SQLite/archive reading**, **image inspection**, **browser automation**, **computer use**, **plan mode**, **vibe mode** (director + persistent worker sessions).
-- **Extensibility** — user-authored skills, MCP servers, hooks, custom slash commands, extensions.
+The provider layer and remote-facing features were cut; the coding-agent surface was not:
 
-Every setting is documented in-app (`/settings`) and in [docs/settings.md](docs/settings.md); the full architecture reference lives under [docs/](docs/).
+- **Editing** — line- and hash-anchored edits, AST-aware structural edits (`ast_edit`, `ast_grep`), conflict-aware writes, checkpoints.
+- **Shell** — persistent interactive bash with PTY support.
+- **LSP & DAP** — real language-server operations and a real debugger, not text heuristics.
+- **Git & GitHub** — commit/PR/review workflows with `gh` wired in.
+- **Review** — structured code review with prioritized findings and a verdict.
+- **Also**: security scanning, PDF/SQLite/archive reading, image inspection, browser automation, computer use, plan mode, vibe mode.
+- **Extensibility** — skills, MCP servers, hooks, custom slash commands, extensions.
+
+Every setting is documented in-app under `/settings` and in [docs/settings.md](docs/settings.md).
+
+---
+
+## Building the installer
+
+Requires the dev toolchain (Bun + Rust):
+
+```sh
+bun setup                                   # workspaces + native addon
+bun run --cwd packages/coding-agent build   # compile the omp binary
+bash scripts/build-installer.sh             # bundle into one self-extracting file
+```
+
+Produces `packages/coding-agent/dist/omp-install.sh` — a single file with the binary embedded, needing no internet access and no artifact server on the target machine.
 
 ## Development
 
 ```sh
-bun setup   # installs workspaces + builds the native Rust/N-API addon
-bun dev     # runs the source CLI
+bun setup   # workspaces + native Rust/N-API addon
+bun dev     # run from source
 ```
 
-Re-run `bun run build:native` after changing Rust crates or `packages/natives`. For architecture and contribution notes, see [packages/coding-agent/DEVELOPMENT.md](packages/coding-agent/DEVELOPMENT.md) and [docs/](docs/).
+Re-run `bun run build:native` after changing Rust crates. See [packages/coding-agent/DEVELOPMENT.md](packages/coding-agent/DEVELOPMENT.md) and [docs/](docs/).
 
 ## License
 
