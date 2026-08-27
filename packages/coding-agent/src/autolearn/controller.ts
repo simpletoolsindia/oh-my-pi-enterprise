@@ -1,8 +1,11 @@
 /**
  * Auto-learn session controller (experimental).
  *
- * Subscribes to the session event stream and, after a substantive turn,
- * optionally auto-runs a synthetic capture turn. Passive mode is intentionally
+ * Subscribes to the session event stream and, after a turn where at least
+ * one tool call errored, optionally auto-runs a synthetic capture turn.
+ * Triggering on friction rather than tool-call volume keeps captures rare
+ * and relevant instead of firing on every long-but-uneventful turn. Passive
+ * mode is intentionally
  * prompt-cache neutral: the standing system guidance remains available, but no
  * hidden mid-session reminder is inserted into the conversation.
  *
@@ -18,7 +21,6 @@ import autolearnNudgeAutoContinue from "../prompts/system/autolearn-nudge-autoco
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 
 const AUTOLEARN_NUDGE_AUTOCONTINUE = autolearnNudgeAutoContinue.trim();
-const DEFAULT_MIN_TOOL_CALLS = 5;
 
 /**
  * Build the standing auto-learn guidance for the system prompt from the tools
@@ -48,7 +50,8 @@ export class AutoLearnController {
 	readonly #session: AgentSession;
 	readonly #settings: Settings;
 	readonly #capture: (content: string) => Promise<void>;
-	#toolCalls = 0;
+	/** Tool calls this turn whose result was reported as an error -- the capture trigger. */
+	#toolErrors = 0;
 	/**
 	 * Whether the in-flight turn BEGAN while goal mode was active. Captured at
 	 * agent_start because a `goal` tool can complete or drop the goal mid-turn,
@@ -77,7 +80,7 @@ export class AutoLearnController {
 			return;
 		}
 		if (event.type === "tool_execution_end") {
-			this.#toolCalls++;
+			if (event.isError) this.#toolErrors++;
 			return;
 		}
 		if (event.type === "agent_end") {
@@ -87,10 +90,10 @@ export class AutoLearnController {
 
 	#onAgentEnd(event: Extract<AgentSessionEvent, { type: "agent_end" }>): void {
 		// Snapshot and reset every turn: the counter describes only the
-		// just-finished turn, so below-threshold, disabled, and plan-mode stops
-		// must not let tool calls accumulate into a later turn.
-		const toolCalls = this.#toolCalls;
-		this.#toolCalls = 0;
+		// just-finished turn, so a turn with no error, a disabled/plan-mode
+		// stop, etc. must not let errors accumulate into a later turn.
+		const toolErrors = this.#toolErrors;
+		this.#toolErrors = 0;
 		// Snapshot the turn-start goal flag alongside the counter so a turn that
 		// observed no agent_start can never inherit a stale value.
 		const startedInGoalMode = this.#turnStartedInGoalMode;
@@ -111,8 +114,12 @@ export class AutoLearnController {
 		// Honor a live opt-out: the subscription outlives the setting, so re-check
 		// the current flag rather than trusting install-time state.
 		if (!this.#settings.get("autolearn.enabled")) return;
-		const minToolCalls = this.#settings.get("autolearn.minToolCalls") ?? DEFAULT_MIN_TOOL_CALLS;
-		if (toolCalls < minToolCalls) return;
+		// Trigger on friction, not on effort: a turn where every tool call
+		// succeeded has nothing corrective to capture, no matter how long it
+		// ran. A turn with at least one tool error is exactly the moment the
+		// agent's expectation broke -- the case autolearn-guidance-learn.md
+		// already asks the model to prioritize recording.
+		if (toolErrors < 1) return;
 		// Never interrupt plan-mode review.
 		if (this.#session.getPlanModeState()?.enabled) return;
 		// Never divert a goal loop. Skip when the turn STARTED in goal mode — a
