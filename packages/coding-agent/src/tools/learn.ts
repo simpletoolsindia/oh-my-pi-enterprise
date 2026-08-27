@@ -23,8 +23,8 @@ export type LearnParams = typeof learnSchema.infer;
  * Orchestrating "learn" tool: persists a lesson to long-term memory and,
  * given a `skill` payload, mints/enhances a managed skill via the shared
  * `writeManagedSkill` primitive. Gated behind `autolearn.enabled` plus a live
- * memory backend — `hindsight`/`mnemopi` (remote/SQLite) or `local` (the
- * file-based rollout backend, where lessons append to `learned.md`).
+ * memory backend — `mnemopi` (local SQLite) or `local` (the file-based
+ * rollout backend, where lessons append to `learned.md`).
  */
 export class LearnTool implements AgentTool<typeof learnSchema> {
 	readonly name = "learn";
@@ -44,7 +44,7 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 	static createIf(session: ToolSession): LearnTool | null {
 		if (!session.settings.get("autolearn.enabled")) return null;
 		const backend = session.settings.get("memory.backend");
-		if (backend !== "hindsight" && backend !== "mnemopi" && backend !== "local") return null;
+		if (backend !== "mnemopi" && backend !== "local") return null;
 		return new LearnTool(session);
 	}
 
@@ -87,12 +87,7 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 				throw new Error("Lesson was empty after sanitization; nothing stored.");
 			}
 		} else {
-			const state = this.session.getHindsightSessionState?.();
-			if (!state) {
-				throw new Error("Hindsight backend is not initialised for this session.");
-			}
-			state.enqueueRetain(params.memory, params.context);
-			memoryMessage = "Lesson queued for retention";
+			throw new Error(`Unsupported memory backend for learn: ${backend}`);
 		}
 
 		// 2) Optionally mint/enhance a managed skill. A failure here is surfaced

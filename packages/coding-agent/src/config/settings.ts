@@ -41,7 +41,6 @@ import { AUTO_IMAGE_PROVIDER_ORDER, isImageProviderId } from "../tools/image-pro
 import { replaceFileAtomically } from "../utils/atomic-file";
 import { type EditMode, normalizeEditMode } from "../utils/edit-mode";
 import { INSPECT_IMAGE_MODES } from "../utils/inspect-image-mode";
-import { isSearchProviderId, SEARCH_PROVIDER_ORDER } from "../web/search/types";
 import { stringifyYamlConfig } from "./config-file";
 import {
 	type BashInterceptorRule,
@@ -2081,17 +2080,8 @@ export class Settings {
 			}
 		}
 
-		// v17 renames that used to nest under a boolean parent path:
-		//   dev.autoqa.consent -> dev.autoqaConsent
+		// v17 rename that used to nest under a boolean parent path:
 		//   todo.reminders.max -> todo.remindersMax
-		migrateNestedLeafRename(
-			raw,
-			"dev",
-			"autoqa",
-			"consent",
-			"autoqaConsent",
-			value => value === "unset" || value === "granted" || value === "denied",
-		);
 		migrateNestedLeafRename(
 			raw,
 			"todo",
@@ -2148,51 +2138,20 @@ export class Settings {
 			if (providerPrefsObj) delete providerPrefsObj[legacyKey];
 			delete raw[flatLegacyKey];
 		};
-		migrateProviderPreference("webSearch", "webSearchOrder", value =>
-			value !== "auto" && isSearchProviderId(value)
-				? [value, ...SEARCH_PROVIDER_ORDER.filter(id => id !== value)]
-				: undefined,
-		);
 		migrateProviderPreference("image", "imageOrder", value =>
 			value !== "auto" && isImageProviderId(value)
 				? [value, ...AUTO_IMAGE_PROVIDER_ORDER.filter(id => id !== value)]
 				: undefined,
 		);
 
-		// Consolidate the retired Exa suite toggles onto the sole remaining
-		// provider switch. The old runtime required both `enabled` and
-		// `enableSearch`, so preserve that AND semantics when both are present.
-		// Researcher and Websets were removed with the standalone Exa tools.
-		const exaObj = isRecord(raw.exa) ? raw.exa : undefined;
-		const exaEnabledValues = [
-			exaObj?.enabled,
-			raw["exa.enabled"],
-			exaObj?.enableSearch,
-			raw["exa.enableSearch"],
-		].filter((value): value is boolean => typeof value === "boolean");
-		const hasFlatExaSetting =
-			"exa.enabled" in raw ||
-			"exa.enableSearch" in raw ||
-			"exa.enableResearcher" in raw ||
-			"exa.enableWebsets" in raw;
-		if (exaObj || hasFlatExaSetting) {
-			const exaRoot = exaObj ?? {};
-			if (exaEnabledValues.length > 0) {
-				exaRoot.enabled = exaEnabledValues.every(Boolean);
-			}
-			delete exaRoot.enableSearch;
-			delete exaRoot.enableResearcher;
-			delete exaRoot.enableWebsets;
-			if (Object.keys(exaRoot).length > 0) {
-				raw.exa = exaRoot;
-			} else {
-				delete raw.exa;
-			}
-			delete raw["exa.enabled"];
-			delete raw["exa.enableSearch"];
-			delete raw["exa.enableResearcher"];
-			delete raw["exa.enableWebsets"];
-		}
+		// Drop any legacy Exa settings entirely — the Exa web-search provider
+		// and MCP integration were removed, so these keys are pure cruft now.
+		delete raw.exa;
+		delete raw["exa.enabled"];
+		delete raw["exa.enableSearch"];
+		delete raw["exa.enableResearcher"];
+		delete raw["exa.enableWebsets"];
+		delete raw["exa.searchDelayMs"];
 
 		// computer.backend and model-specific controller routing were removed
 		// when the computer tool moved to one native desktop implementation.

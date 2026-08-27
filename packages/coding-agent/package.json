@@ -39,11 +39,10 @@
     "fix": "biome check --write --unsafe . && bun run format-prompts",
     "fmt": "biome format --write . && bun run format-prompts",
     "format-prompts": "bun scripts/format-prompts.ts",
-    "gen:tool-views": "bun --cwd=../collab-web run gen:tool-views",
     "gen:bundle": "bun scripts/bundle-dist.ts",
     "gen:native": "bun --cwd=../natives run gen:native",
     "gen:native:reset": "bun --cwd=../natives run gen:native:reset",
-    "prepack": "bun run gen:tool-views && bun run gen:bundle",
+    "prepack": "bun run gen:bundle",
     "bench:guard": "bun scripts/bench-guard.ts"
   },
   "dependencies": {
@@ -60,17 +59,6 @@
     "@oh-my-pi/pi-utils": "catalog:",
     "@oh-my-pi/pi-wire": "catalog:",
     "@oh-my-pi/snapcompact": "catalog:",
-    "@opentelemetry/api": "catalog:",
-    "@opentelemetry/api-logs": "catalog:",
-    "@opentelemetry/context-async-hooks": "catalog:",
-    "@opentelemetry/exporter-logs-otlp-proto": "catalog:",
-    "@opentelemetry/exporter-metrics-otlp-proto": "catalog:",
-    "@opentelemetry/exporter-trace-otlp-proto": "catalog:",
-    "@opentelemetry/resources": "catalog:",
-    "@opentelemetry/sdk-logs": "catalog:",
-    "@opentelemetry/sdk-metrics": "catalog:",
-    "@opentelemetry/sdk-trace-base": "catalog:",
-    "@opentelemetry/sdk-trace-node": "catalog:",
     "puppeteer-core": "catalog:"
   },
   "optionalDependencies": {

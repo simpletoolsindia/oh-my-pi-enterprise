@@ -1,12 +1,10 @@
 import { THINKING_EFFORTS } from "@oh-my-pi/pi-ai";
-import { DEFAULT_SHARE_URL } from "@oh-my-pi/pi-wire";
 import { SHAPE_VARIANT_NAMES } from "@oh-my-pi/snapcompact";
 import {
 	type BlobDestinationId,
 	type BlobDestinationMetadata,
 	BUILTIN_BLOB_DESTINATIONS,
 } from "../blob-broker/destinations";
-import { DEFAULT_RELAY_URL } from "../collab/protocol";
 import { DEFAULT_LIVE_VOICE, LIVE_VOICE_OPTIONS, LIVE_VOICE_VALUES } from "../live/voices";
 import {
 	COMPACTION_METHOD_CHOICES,
@@ -47,12 +45,6 @@ import {
 	TTS_LOCAL_VOICE_VALUES,
 } from "../tts/models";
 import { EDIT_MODES } from "../utils/edit-mode";
-import {
-	DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
-	MAX_WEB_SEARCH_TIMEOUT_SECONDS,
-	SEARCH_PROVIDER_CHOICES,
-	type SearchProviderId,
-} from "../web/search/types";
 import {
 	SERVICE_TIER_ANTHROPIC_OPTIONS,
 	SERVICE_TIER_ANTHROPIC_VALUES,
@@ -2117,49 +2109,6 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	"startup.checkUpdate": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "interaction",
-			group: "Startup & Updates",
-			label: "Check for Updates",
-			description: "Check for omp updates on startup",
-		},
-	},
-	"update.channel": {
-		type: "enum",
-		values: ["stable", "canary"] as const,
-		default: "stable",
-		ui: {
-			tab: "interaction",
-			group: "Startup & Updates",
-			label: "Update Channel",
-			description: "Update channel used by omp update and the startup update check",
-			options: [
-				{ value: "stable", label: "Stable" },
-				{ value: "canary", label: "Canary" },
-			],
-		},
-	},
-
-	"marketplace.autoUpdate": {
-		type: "enum",
-		values: ["off", "notify", "auto"] as const,
-		default: "notify",
-		ui: {
-			tab: "interaction",
-			group: "Startup & Updates",
-			label: "Marketplace Auto-Update",
-			description: "Check for plugin updates on startup",
-			options: [
-				{ value: "off", label: "Off", description: "Don't check for plugin updates" },
-				{ value: "notify", label: "Notify", description: "Check on startup and notify when updates are available" },
-				{ value: "auto", label: "Auto", description: "Check on startup and auto-install updates" },
-			],
-		},
-	},
-
 	"startup.changelogMode": {
 		type: "enum",
 		values: ["summary", "expanded", "hidden"] as const,
@@ -2314,88 +2263,6 @@ export const SETTINGS_SCHEMA = {
 				{ value: "300", label: "5 minutes" },
 				{ value: "600", label: "10 minutes" },
 			],
-		},
-	},
-
-	// Collab
-	"collab.relayUrl": {
-		type: "string",
-		default: DEFAULT_RELAY_URL,
-		ui: {
-			tab: "interaction",
-			group: "Collab",
-			label: "Relay URL",
-			description: "Relay used by /collab (wss://host[:port])",
-		},
-	},
-
-	"collab.webUrl": {
-		type: "string",
-		default: "",
-		ui: {
-			tab: "interaction",
-			group: "Collab",
-			label: "Web UI URL",
-			description:
-				"Browser UI used by /collab links; empty derives from collab.relayUrl; explicit http:// is localhost-only",
-		},
-	},
-
-	"collab.displayName": {
-		type: "string",
-		default: "",
-		ui: {
-			tab: "interaction",
-			group: "Collab",
-			label: "Display Name",
-			description: "Name shown to other collab participants (default: OS username)",
-		},
-	},
-
-	"share.serverUrl": {
-		type: "string",
-		default: DEFAULT_SHARE_URL,
-		ui: {
-			tab: "interaction",
-			group: "Collab",
-			label: "Share Server",
-			description:
-				"Share viewer/upload base used by /share (encrypted blob upload + viewer; links are <base>/<id>#<key>)",
-		},
-	},
-
-	"share.store": {
-		type: "enum",
-		values: ["blob", "gist"] as const,
-		default: "blob",
-		ui: {
-			tab: "interaction",
-			group: "Collab",
-			label: "Share Store",
-			description: "Where /share uploads the encrypted session blob",
-			options: [
-				{
-					value: "blob",
-					label: "Encrypted Blob",
-					description: "Upload to the share server (no GitHub account needed; avoids gist API rate limits)",
-				},
-				{
-					value: "gist",
-					label: "GitHub Gist",
-					description: "Push to a secret gist (needs authenticated gh), falling back to the share server",
-				},
-			],
-		},
-	},
-
-	"share.redactSecrets": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "interaction",
-			group: "Collab",
-			label: "Share Secret Redaction",
-			description: "Run the secret obfuscator over /share snapshots before upload (uses the secrets.* config)",
 		},
 	},
 
@@ -2932,7 +2799,7 @@ export const SETTINGS_SCHEMA = {
 	"memory.backend": {
 		type: "enum",
 		values: ["off", "local", "hindsight", "mnemopi"] as const,
-		default: "off",
+		default: "mnemopi",
 		ui: {
 			tab: "memory",
 			group: "General",
@@ -2953,10 +2820,11 @@ export const SETTINGS_SCHEMA = {
 
 	// Auto-Learn (experimental): post-stop nudge to capture lessons to memory
 	// and mint/enhance isolated managed skills under ~/.omp/agent/managed-skills.
-	// Master flag is default-off → zero footprint; sub-flags gate behaviour.
+	// Default-on in this build so the agent improves from usage without setup;
+	// sub-flags gate the more expensive behaviour.
 	"autolearn.enabled": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "memory",
 			group: "Auto-Learn",
@@ -4415,17 +4283,6 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	"web_search.enabled": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "tools",
-			group: "Available Tools",
-			label: "Web Search",
-			description: "Enable the web_search tool for live web results",
-		},
-	},
-
 	"security.enabled": {
 		type: "boolean",
 		default: false,
@@ -5236,57 +5093,6 @@ export const SETTINGS_SCHEMA = {
 				"Maximum concurrent Ollama Cloud subagent runs per process; 0 disables the provider-specific limit",
 		},
 	},
-	"providers.webSearchOrder": {
-		type: "array",
-		default: [] as SearchProviderId[],
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Web Search Provider Order",
-			description:
-				"Prioritized providers for the web_search tool; unlisted providers retain their default order afterward",
-			options: SEARCH_PROVIDER_CHOICES,
-			ordered: true,
-		},
-	},
-	"providers.webSearchExclude": {
-		type: "array",
-		default: [] as SearchProviderId[],
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Excluded Web Search Providers",
-			description: "Providers that web_search should never use, even as fallbacks",
-			options: SEARCH_PROVIDER_CHOICES,
-		},
-	},
-	"providers.webSearchTimeoutSeconds": {
-		type: "number",
-		default: DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Web Search Timeout",
-			description: `Hard timeout for each provider's search transport before web_search advances to the next fallback, in seconds (maximum ${MAX_WEB_SEARCH_TIMEOUT_SECONDS})`,
-			options: [
-				{ value: "30", label: "30 seconds" },
-				{ value: "60", label: "1 minute" },
-				{ value: "120", label: "2 minutes" },
-				{ value: "180", label: "3 minutes" },
-				{ value: "300", label: "5 minutes" },
-			],
-		},
-	},
-	"providers.webSearchGeminiModel": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Gemini web_search model",
-			description: "Model ID for Gemini Google Search grounding. Defaults to gemini-2.5-flash.",
-		},
-	},
 	"providers.antigravityEndpoint": {
 		type: "enum",
 		values: ["auto", "production", "sandbox"] as const,
@@ -5719,7 +5525,7 @@ export const SETTINGS_SCHEMA = {
 	},
 	"providers.fetch": {
 		type: "enum",
-		values: ["auto", "native", "trafilatura", "lynx", "parallel", "jina"] as const,
+		values: ["auto", "native", "trafilatura", "lynx"] as const,
 		default: "auto",
 		ui: {
 			tab: "providers",
@@ -5730,13 +5536,11 @@ export const SETTINGS_SCHEMA = {
 				{
 					value: "auto",
 					label: "Auto",
-					description: "Priority: native > trafilatura > lynx > parallel > jina",
+					description: "Priority: native > trafilatura > lynx",
 				},
 				{ value: "native", label: "Native", description: "In-process HTML→Markdown converter (always available)" },
 				{ value: "trafilatura", label: "Trafilatura", description: "Auto-installs via uv/pip" },
 				{ value: "lynx", label: "Lynx", description: "Requires lynx system package" },
-				{ value: "parallel", label: "Parallel", description: "Requires PARALLEL_API_KEY" },
-				{ value: "jina", label: "Jina", description: "Uses r.jina.ai reader (JINA_API_KEY optional)" },
 			],
 		},
 	},
@@ -5813,78 +5617,6 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	// Exa
-	"exa.enabled": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Exa",
-			description: "Enable the Exa web search provider",
-		},
-	},
-
-	"exa.searchDelayMs": {
-		type: "number",
-		default: 1_000,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "Exa Search Delay",
-			description: "Minimum delay between Exa web search requests in milliseconds; set 0 to disable pacing",
-		},
-	},
-
-	// SearXNG
-	"searxng.endpoint": {
-		type: "string",
-		default: undefined,
-		ui: {
-			tab: "providers",
-			group: "Services",
-			label: "SearXNG Endpoint",
-			description: "Base URL of a self-hosted SearXNG instance used for web search",
-		},
-	},
-
-	"searxng.token": {
-		type: "string",
-		default: undefined,
-		credential: true,
-	},
-
-	"searxng.basicUsername": {
-		type: "string",
-		default: undefined,
-	},
-
-	"searxng.basicPassword": {
-		type: "string",
-		default: undefined,
-		credential: true,
-	},
-
-	"searxng.categories": {
-		type: "string",
-		default: undefined,
-	},
-
-	"searxng.engines": {
-		type: "string",
-		default: undefined,
-	},
-
-	"searxng.language": {
-		type: "string",
-		default: undefined,
-	},
-
-	"searxng.safesearch": {
-		type: "number",
-		default: undefined,
-	},
-
 	"commit.mapReduceEnabled": { type: "boolean", default: true },
 
 	"commit.mapReduceThreshold": { type: "number", default: 5000 },
@@ -5907,54 +5639,6 @@ export const SETTINGS_SCHEMA = {
 			description:
 				"Positive finite active-work timeout for extension tool_call handlers; invalid values use 30000ms, and time awaiting OMP-owned dialogs does not count",
 		},
-	},
-
-	"dev.autoqa": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "tools",
-			group: "Developer",
-			label: "Auto QA",
-			description:
-				"Automated tool issue reporting (xd://report_issue). On by default; the first report asks for consent, and denying it disables reporting until re-enabled explicitly",
-		},
-	},
-
-	"dev.autoqaPush.endpoint": {
-		type: "string",
-		default: "https://qa.omp.sh/v1/grievances" as const,
-		ui: {
-			tab: "tools",
-			group: "Developer",
-			label: "Auto QA Push Endpoint",
-			description: "Full URL receiving Auto QA JSON reports (default https://qa.omp.sh/v1/grievances)",
-		},
-	},
-
-	"dev.autoqaPush.token": {
-		type: "string",
-		default: undefined,
-		credential: true,
-	},
-
-	/**
-	 * User decision on sharing automatic `report_tool_issue` grievances.
-	 *
-	 *   - `"unset"`  — never asked; the first `report_tool_issue` invocation
-	 *                  pops a consent dialog and persists the answer here.
-	 *   - `"granted"` — record and (when push is configured) ship grievances.
-	 *   - `"denied"`  — silently no-op every `report_tool_issue` call.
-	 *
-	 * Owned by `packages/coding-agent/src/tools/report-tool-issue.ts` via the
-	 * process-global consent handler registered by `InteractiveMode`.
-	 *
-	 * @default "unset"
-	 */
-	"dev.autoqaConsent": {
-		type: "enum",
-		values: ["unset", "granted", "denied"] as const,
-		default: "unset" as const,
 	},
 
 	"gc.blobs": { type: "boolean", default: true },

@@ -1219,10 +1219,7 @@ export class SettingsSelectorComponent implements Component {
 	}
 
 	#getMultiSelectOptions(def: SettingDef & { type: "multiselect" }) {
-		if (def.path !== "providers.webSearchOrder") return def.options;
-		const excluded: unknown = settings.get("providers.webSearchExclude");
-		if (!Array.isArray(excluded)) return def.options;
-		return def.options.filter(option => !excluded.includes(option.value));
+		return def.options;
 	}
 
 	#createMultiSelect(def: SettingDef & { type: "multiselect" }, done: (value?: string) => void): Container {

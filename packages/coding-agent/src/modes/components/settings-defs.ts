@@ -105,13 +105,6 @@ const CONDITIONS: Record<string, () => boolean> = {
 			return false;
 		}
 	},
-	hindsightActive: () => {
-		try {
-			return Settings.instance.get("memory.backend") === "hindsight";
-		} catch {
-			return false;
-		}
-	},
 	mnemopiActive: () => {
 		try {
 			return Settings.instance.get("memory.backend") === "mnemopi";
