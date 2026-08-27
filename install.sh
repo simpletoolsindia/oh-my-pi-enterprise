@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-# omp installer — ONE script, installs everything, works offline after.
+# omp installer — ONE script, no internet needed.
 #
 # Usage:
 #   bash install.sh
 #
-# After this finishes, just run: omp
+# This script installs the pre-built omp binary, asks for your
+# LLM server, and you're done. Works fully offline.
 # ─────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -24,52 +25,40 @@ if [ "$OS" != "Darwin" ] || [ "$ARCH" != "arm64" ]; then
 fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# --- Install Bun ---
-echo "▶ [1/5] Checking Bun..."
-if command -v bun &>/dev/null; then
-    echo "  ✓ Bun $(bun --version)"
-else
-    echo "  Installing Bun..."
-    curl -fsSL https://bun.sh/install | bash
-    export BUN_INSTALL="$HOME/.bun"
-    export PATH="$BUN_INSTALL/bin:$PATH"
-    echo "  ✓ Bun installed"
-fi
-
-# --- Install Rust ---
-echo "▶ [2/5] Checking Rust..."
-if command -v rustc &>/dev/null; then
-    echo "  ✓ Rust $(rustc --version | awk '{print $2}')"
-else
-    echo "  Installing Rust (nightly)..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain nightly
-    source "$HOME/.cargo/env"
-    echo "  ✓ Rust installed"
-fi
-
-# --- Build ---
-echo "▶ [3/5] Building omp (first time takes a few minutes)..."
-cd "$REPO_DIR"
-bun setup 2>&1 | tail -3
-bun run --cwd packages/coding-agent build 2>&1 | tail -3
-
 BINARY="$REPO_DIR/packages/coding-agent/dist/omp"
+BINARY_GZ="$REPO_DIR/packages/coding-agent/dist/omp.gz"
+
+# Decompress if needed
+if [ ! -f "$BINARY" ] && [ -f "$BINARY_GZ" ]; then
+    echo "  Decompressing binary..."
+    gunzip -k "$BINARY_GZ"
+    chmod +x "$BINARY"
+fi
+
 if [ ! -f "$BINARY" ]; then
-    echo "Error: Build failed." >&2
+    echo "Error: Binary not found at:" >&2
+    echo "  $BINARY (or $BINARY_GZ)" >&2
+    echo "" >&2
+    echo "A developer must build it first:" >&2
+    echo "  bun setup && bun run --cwd packages/coding-agent build" >&2
     exit 1
 fi
 
 # --- Install binary ---
-echo "▶ [4/5] Installing binary..."
+echo "▶ [1/3] Installing binary..."
 INSTALL_DIR="$HOME/.local/bin"
 mkdir -p "$INSTALL_DIR"
 cp "$BINARY" "$INSTALL_DIR/omp"
 chmod +x "$INSTALL_DIR/omp"
-echo "  ✓ Installed to $INSTALL_DIR/omp"
+
+if ! VERSION="$("$INSTALL_DIR/omp" --version 2>&1)"; then
+    echo "  Error: binary cannot start." >&2
+    exit 1
+fi
+echo "  ✓ omp installed ($VERSION)"
 
 # --- LLM Provider ---
-echo "▶ [5/5] LLM Provider Setup"
+echo "▶ [2/3] LLM Provider Setup"
 
 MODELS_DIR="$HOME/.omp/agent"
 MODELS_FILE="$MODELS_DIR/models.yml"
@@ -98,7 +87,7 @@ else
     if curl -fsS --max-time 8 -H "Authorization: Bearer $KEY" "$URL/models" >/dev/null 2>&1; then
         echo "✓ connected"
     else
-        echo "✗ can't reach server (fix later with /provider edit in omp)"
+        echo "✗ can't reach server (fix later with /provider edit)"
     fi
 
     mkdir -p "$MODELS_DIR"
@@ -114,16 +103,13 @@ providers:
         contextWindow: 128000
         maxTokens: 8192
 EOF
-    echo "  ✓ Saved to $MODELS_FILE"
+    echo "  ✓ Saved"
 fi
 
 # --- PATH ---
-echo ""
+echo "▶ [3/3] PATH setup"
 case ":$PATH:" in
     *":$INSTALL_DIR:"*)
-        echo "═══════════════════════════════════"
-        echo "  Done! Run:  omp"
-        echo "═══════════════════════════════════"
         ;;
     *)
         RC=""
@@ -133,14 +119,19 @@ case ":$PATH:" in
         esac
         if [ -n "$RC" ]; then
             printf '\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$RC"
-            echo "═══════════════════════════════════"
-            echo "  Done! Run:"
-            echo "    source $RC"
-            echo "    omp"
-            echo "═══════════════════════════════════"
+            echo "  ✓ Added to PATH in $RC"
         else
-            echo "  Add $INSTALL_DIR to PATH, then run: omp"
+            echo "  Add $INSTALL_DIR to your PATH manually."
         fi
         ;;
 esac
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "  Done! Run:  omp"
+echo "═══════════════════════════════════════"
+echo ""
+echo "  Change provider later:  /provider edit"
+echo "  Switch models:          /model"
+echo "  All settings:           /settings"
 echo ""

@@ -1,33 +1,41 @@
 # omp — local coding agent
 
-A terminal coding agent that runs against **your own LLM server**. Fully offline after install. No telemetry, no cloud, no tracking.
+A terminal coding agent that runs against **your own LLM server**. Fully offline. No telemetry, no cloud, no tracking.
 
 ---
 
-## Install
+## Install (no internet needed)
 
 ```sh
-git clone https://github.com/simpletoolsindia/oh-my-pi-enterprise.git
-cd oh-my-pi-enterprise
 bash install.sh
 ```
 
-The script does everything automatically:
+It does 3 things:
 
-1. Installs Bun (if needed)
-2. Installs Rust (if needed)
-3. Builds the `omp` binary
-4. Asks for your LLM server (URL, key, model)
-5. Tests the connection
-6. Adds `omp` to your PATH
+1. Copies the `omp` binary to `~/.local/bin/`
+2. Asks for your LLM server (URL, key, model)
+3. Adds `omp` to your PATH
 
-After install, **everything runs offline** — no internet needed to use omp.
+Then:
 
 ```sh
 omp
 ```
 
-> Requires: macOS Apple Silicon + internet (first run only for build tools)
+> Works on macOS Apple Silicon. No internet, no Bun, no Rust, no npm needed.
+
+---
+
+## How your team ships this
+
+One developer (with internet) builds once:
+
+```sh
+bun setup
+bun run --cwd packages/coding-agent build
+```
+
+Then shares this repo (with the `packages/coding-agent/dist/omp` binary included). Everyone else just runs `bash install.sh`.
 
 ---
 
@@ -37,13 +45,10 @@ Inside any omp session:
 
 ```
 /provider           — show current config
-/provider add       — create config from template
 /provider edit      — open config in editor
 /provider test      — test server connectivity
 /provider reload    — apply changes without restart
 ```
-
-Or edit `~/.omp/agent/models.yml` directly.
 
 ---
 
@@ -67,23 +72,23 @@ Or edit `~/.omp/agent/models.yml` directly.
 ## Commands
 
 ```sh
-omp                  # start interactive session
-omp -p "prompt"      # non-interactive (process and exit)
+omp                  # start session
+omp -p "prompt"      # non-interactive
 omp --continue       # resume last session
 omp models ls        # list models
 omp perf             # performance report
 omp --help           # all commands
 ```
 
-Session commands: `/provider`, `/model`, `/settings`, `/memory`, `/tools`, `/help`
+Session: `/provider`, `/model`, `/settings`, `/memory`, `/tools`, `/help`
 
 ---
 
 ## Memory (enabled by default)
 
-The agent remembers across sessions — learns from errors, stores lessons, builds skills. All local SQLite, nothing sent anywhere.
+Learns from errors, stores lessons, builds skills. All local SQLite.
 
-Optional: add embeddings for better recall. Edit `~/.omp/agent/config.yml`:
+Optional embeddings for better recall — add to `~/.omp/agent/config.yml`:
 
 ```yaml
 mnemopi:
@@ -91,6 +96,17 @@ mnemopi:
   embeddingApiUrl: "http://localhost:11434/v1"
   embeddingApiKey: "ollama"
   embeddingModel: "nomic-embed-text"
+```
+
+---
+
+## For developers (building from source)
+
+```sh
+bun setup                                    # install deps + native addon
+bun run dev                                  # run from source
+bun run --cwd packages/coding-agent build    # compile binary
+bun run test                                 # run tests
 ```
 
 ---
