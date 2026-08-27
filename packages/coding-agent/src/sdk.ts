@@ -1171,18 +1171,17 @@ export function createAutoLearnCaptureRunner(
 
 		const captureSessionId = options.createSessionId?.() ?? Bun.randomUUIDv7();
 		const captureProviderSessionState = new Map<string, ProviderSessionState>();
-		const captureMessages = sliceToLastUserTurns(
-			options.sourceAgent.state.messages,
-			options.contextTurns ?? 2,
-		).map((message): AgentMessage => {
-			if (message.role === "assistant") {
-				return { ...message, responseId: undefined, providerPayload: undefined };
-			}
-			if (message.role === "user" || message.role === "developer") {
-				return { ...message, providerPayload: undefined };
-			}
-			return message;
-		});
+		const captureMessages = sliceToLastUserTurns(options.sourceAgent.state.messages, options.contextTurns ?? 2).map(
+			(message): AgentMessage => {
+				if (message.role === "assistant") {
+					return { ...message, responseId: undefined, providerPayload: undefined };
+				}
+				if (message.role === "user" || message.role === "developer") {
+					return { ...message, providerPayload: undefined };
+				}
+				return message;
+			},
+		);
 		const captureAgent = options.createAgent({
 			initialState: {
 				systemPrompt: [...options.sourceAgent.state.systemPrompt],
