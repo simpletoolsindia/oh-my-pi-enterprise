@@ -7,7 +7,7 @@ import type * as MnemopiDiagnoseNs from "@oh-my-pi/pi-mnemopi/diagnose";
 import type { DiagnosticSummary } from "@oh-my-pi/pi-mnemopi/diagnose";
 import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../config/model-registry";
-import { resolveRoleSelection } from "../config/model-resolver";
+import { findSmolModel, resolveRoleSelection } from "../config/model-resolver";
 import type {
 	MemoryBackend,
 	MemoryBackendSaveInput,
@@ -522,10 +522,21 @@ async function resolveMnemopiProviderOptions(
 	}
 
 	try {
+		// `resolveRoleSelection` only answers for an explicitly configured role:
+		// an unset `modelRoles.tiny`/`modelRoles.smol` short-circuits to
+		// undefined before the built-in priority chain is ever consulted. That
+		// chain is also useless here by construction -- it lists upstream
+		// provider model ids (cerebras/…, google-antigravity/…) that cannot
+		// exist in a build with a single user-defined provider. Without a
+		// fallback, `llmMode: "smol"` (the default) would silently disable
+		// memory fact-extraction for every user who never hand-configured a
+		// role, which is most of them. `findSmolModel` applies the same chain
+		// and then falls back to the first available model, so the memory
+		// pipeline gets a usable model instead of quietly degrading.
 		const resolved = resolveRoleSelection(["tiny", "smol"], settings, modelRegistry.getAvailable());
-		const model = resolved?.model;
+		const model = resolved?.model ?? (await findSmolModel(modelRegistry));
 		if (!model) {
-			logger.warn("Mnemopi: llmMode=smol but no tiny/smol model resolved; continuing without LLM.");
+			logger.warn("Mnemopi: llmMode=smol but no model is available; continuing without LLM.");
 			return base;
 		}
 		return {
