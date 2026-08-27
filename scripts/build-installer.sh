@@ -80,11 +80,29 @@ yaml_quote() {
 
 if [ -f "$MODELS_FILE" ]; then
     echo "A config already exists at $MODELS_FILE — leaving it untouched."
+    echo "(To redo setup, delete that file and re-run this installer.)"
 else
     echo "Set up your custom OpenAI-compatible model provider."
-    read -r -p "Server URL (e.g. https://api.example.com/v1): " PROVIDER_URL
-    read -r -s -p "API key: " PROVIDER_KEY
+    echo "(This is the only provider omp talks to — no other API is called.)"
     echo ""
+
+    while :; do
+        read -r -p "Server URL (e.g. https://api.example.com/v1): " PROVIDER_URL
+        read -r -s -p "API key: " PROVIDER_KEY
+        echo ""
+
+        printf '%s' "Testing connection... "
+        if curl -fsS --max-time 10 -H "Authorization: Bearer $PROVIDER_KEY" "$PROVIDER_URL/models" >/dev/null 2>&1; then
+            echo "connected."
+            break
+        fi
+        echo "could not reach $PROVIDER_URL/models with that key."
+        read -r -p "Try a different URL/key? [Y/n]: " RETRY
+        case "$RETRY" in
+            [Nn]*) echo "Continuing anyway — you can fix this later by editing $MODELS_FILE." ; break ;;
+            *) continue ;;
+        esac
+    done
 
     MODEL_IDS=()
     while :; do
@@ -120,8 +138,21 @@ fi
 
 echo ""
 case ":$PATH:" in
-    *":$INSTALL_DIR:"*) echo "Run 'omp' to get started!" ;;
-    *) echo "Add $INSTALL_DIR to your PATH, then run 'omp'." ;;
+    *":$INSTALL_DIR:"*) echo "All set — run 'omp' to get started!" ;;
+    *)
+        SHELL_RC=""
+        case "$(basename "${SHELL:-}")" in
+            zsh) SHELL_RC="$HOME/.zshrc" ;;
+            bash) SHELL_RC="$HOME/.bashrc" ;;
+        esac
+        if [ -n "$SHELL_RC" ]; then
+            printf '\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$SHELL_RC"
+            echo "Added $INSTALL_DIR to PATH in $SHELL_RC."
+            echo "Restart your terminal (or run: source $SHELL_RC), then run 'omp'."
+        else
+            echo "Add $INSTALL_DIR to your PATH, then run 'omp'."
+        fi
+        ;;
 esac
 
 exit 0

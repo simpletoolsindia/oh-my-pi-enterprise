@@ -34,64 +34,42 @@ The most capable agent surface that ships. Continuously tuned by real-world use 
 
 ## Install
 
-**macOS · Linux**
+This is a locked-down, self-hosted fork: no telemetry, no update checks, no remote provider list — just `omp` talking to **one OpenAI-compatible server you point it at**. There's nothing to publish or fetch from the internet at install time; the whole install is one file.
+
+### Quick start (end users)
+
+Someone on your team already built `omp-install.sh` (see **Building the installer** below) and handed it to you. To install:
 
 ```sh
-curl -fsSL https://omp.sh/install | sh
+bash omp-install.sh
 ```
 
-> **Alpine / musl:** the prebuilt musl binary links `libstdc++`/`libgcc` dynamically, which stock Alpine does not ship. Install them first: `apk add libstdc++ libgcc`.
+It will:
 
-**Homebrew**
+1. Install the `omp` binary to `~/.local/bin` (or `$PI_INSTALL_DIR` if you set it) and confirm it starts.
+2. Ask for your model server's **URL**, **API key**, and one or more **model names** — then immediately test the connection and let you fix a typo before writing anything.
+3. Write `~/.omp/agent/models.yml` and add `~/.local/bin` to your `PATH` if it isn't already there.
+
+Then just run:
 
 ```sh
-brew install can1357/tap/omp
+omp
 ```
 
-**Bun (recommended)**
+Re-running the installer later is safe — if `~/.omp/agent/models.yml` already exists, it's left untouched. To redo setup (new server, new key, more models), delete that file first and run the installer again, or hand-edit the YAML directly (see [Custom OpenAI-compatible providers](#custom-openai-compatible-providers) below).
+
+> Currently supports **macOS on Apple Silicon (darwin-arm64)** only.
+
+### Building the installer (once, per release)
+
+Requires the full dev toolchain (Bun + Rust — see [Getting started from source](#getting-started-from-source)):
 
 ```sh
-bun install -g @oh-my-pi/pi-coding-agent
+bun run --cwd packages/coding-agent build   # compiles the omp binary
+bash scripts/build-installer.sh             # bundles it into one self-extracting file
 ```
 
-**Nix**
-
-```sh
-# Run without installing
-nix run github:can1357/oh-my-pi
-
-# Or install into the active profile
-nix profile install github:can1357/oh-my-pi
-```
-
-Flake consumers can use `packages.<system>.omp`, `overlays.default`, `nixosModules.default`, or `homeManagerModules.default`. A Home Manager configuration can install OMP and own its settings declaratively:
-
-```nix
-{
-  inputs.omp.url = "github:can1357/oh-my-pi";
-
-  # In your Home Manager module:
-  imports = [ inputs.omp.homeManagerModules.default ];
-  programs.omp = {
-    enable = true;
-    settings.startup.quiet = true;
-  };
-}
-```
-
-**Windows (PowerShell)**
-
-```powershell
-irm https://omp.sh/install.ps1 | iex
-```
-
-**Pinned versions (mise)**
-
-```sh
-mise use -g github:can1357/oh-my-pi
-```
-
-macOS · Linux · Windows · bun ≥ 1.3.14
+This produces `packages/coding-agent/dist/omp-install.sh` — a single file with the compiled binary embedded (base64), so it needs no internet access and no internal artifact server to run on a target machine. Copy that one file to whoever needs `omp` and have them run it as shown above.
 
 ### Shell completions
 
@@ -328,29 +306,11 @@ Slash commands shift how a whole session runs:
 - `/vibe` — enter [Vibe mode](docs/vibe-mode.md): act as a director driving persistent `fast`/`good` worker sessions with a `read`-only toolset.
 - `/fresh` — reset the provider stream state (stale prompt cache, wedged stream) without changing the local transcript. See [Session operations](docs/session-operations-export-share-fork-resume.md#fresh).
 
-## Sixty-plus providers, a thousand models, _one /model away_.
+## One provider, as many models as you configure, _one /model away_.
 
-Ten roles route work by intent. `default` for normal turns. `smol` for cheap subagent fan-out. `slow` for deep reasoning. `plan` for plan mode. `commit` for changelogs. Plus `vision`, `designer`, `task`, `advisor`, and `tiny` for their namesakes. Override at launch with `--smol`, `--slow`, or `--plan`; cycle through the configured models for the active role with `Ctrl+P`. Swap the active model mid-session with the `/model` slash command.
+This fork intentionally supports exactly **one provider**: your own OpenAI-compatible server (self-hosted, an internal gateway, whatever you point it at) — set up once by the installer above. There is no OAuth, no other provider's API, and no remote provider catalog to fetch; everything routes to the `baseUrl`/`apiKey` in `~/.omp/agent/models.yml`.
 
-Auth tags below: `oauth` signs in with your provider account, `plan` routes through a coding-plan subscription, `local` runs against a local server with the key optional.
-
-### Frontier APIs
-
-Direct APIs and gateways. Mix providers per role.
-
-Anthropic `oauth` · OpenAI · OpenAI Codex `oauth` · Google Gemini · Google Vertex · Google Antigravity `oauth` · xAI · SuperGrok `oauth` · DeepSeek · Mistral · Groq · Cerebras · Fireworks · Together · Baseten · DeepInfra · Hugging Face · NVIDIA · Meta · Amazon Bedrock · Azure OpenAI · SiliconFlow · GMI Cloud · CoreWeave · Sakana AI · OpenRouter · Synthetic · Vercel AI Gateway · Cloudflare AI Gateway · Wafer Serverless
-
-### Coding plans
-
-Subscription-routed. `/login` attaches the session.
-
-Cursor `oauth` · GitHub Copilot `oauth` · GitLab Duo · Devin `oauth` · Kimi Code `plan` · Moonshot · MiniMax Coding Plan `plan` · MiniMax Coding Plan CN `plan` · Alibaba Coding Plan `plan` · Qwen Portal `oauth` · Z.AI / GLM Coding Plan `plan` · Zhipu Coding Plan `plan` · Xiaomi MiMo · Qianfan · Umans `plan` · NanoGPT · Novita · Venice · Kilo · ZenMux · OpenCode Go · OpenCode Zen
-
-### Run it yourself
-
-OpenAI-compatible `/v1/models`. Local instances skip the key.
-
-Ollama `local` · Ollama Cloud · LM Studio `local` · llama.cpp `local` · vLLM `local` · LiteLLM
+Ten roles route work by intent. `default` for normal turns. `smol` for cheap subagent fan-out. `slow` for deep reasoning. `plan` for plan mode. `commit` for changelogs. Plus `vision`, `designer`, `task`, `advisor`, and `tiny` for their namesakes. Override at launch with `--smol`, `--slow`, or `--plan`; cycle through the configured models for the active role with `Ctrl+P`. Swap the active model mid-session with the `/model` slash command — every model your server exposes under `models:` in `models.yml` is selectable this way.
 
 ### Custom OpenAI-compatible providers
 
@@ -390,8 +350,6 @@ modelRoles:
 - **Fallback chains** — Per-role or per-model chains under `retry.fallbackChains`. When the primary throws 429s or hits a quota wall, the next entry takes the rest of the turn — restored on cooldown.
 - **Path-scoped models** — Scope `enabledModels` and `disabledProviders` entries to a `path:` prefix to pin a different model set on one repo without touching the global config. Scoped entries cover the path and everything under it.
 - **Round-robin credentials** — Stack API keys per provider and the runtime rotates with session affinity and per-credential backoff. Useful when one key would burn its quota by lunch.
-
-Full provider & routing reference at [omp.sh/docs/providers](https://omp.sh/docs/providers).
 
 ## Twenty-three backends. _One tool the agent already knows_.
 
