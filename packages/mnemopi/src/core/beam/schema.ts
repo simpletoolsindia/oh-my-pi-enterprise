@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { transaction } from "../../db";
+import { normalizeContentForDedup } from "./helpers";
 
 type PragmaTableInfoRow = {
 	name: string;
@@ -307,6 +309,26 @@ export function initBeam(db: Database): void {
 		"CREATE INDEX IF NOT EXISTS idx_wm_superseded_timestamp ON working_memory(superseded_by, timestamp)",
 		"CREATE INDEX IF NOT EXISTS idx_em_superseded_timestamp ON episodic_memory(superseded_by, timestamp)",
 	]);
+
+	// Duplicate detection used to be `content = ? AND session_id = ?`: an exact
+	// string match scoped to one session, so the same lesson relearned in a
+	// later session (the common case for a per-turn capture loop) never
+	// deduped, and surface variation (punctuation, casing, whitespace) always
+	// missed. `content_norm` holds a normalized form so lookups can match
+	// across sessions and past cosmetic differences.
+	if (addColumnIfMissing(db, "working_memory", "content_norm", "TEXT DEFAULT NULL")) {
+		const rows = db.query("SELECT id, content FROM working_memory").all() as Array<{
+			id: string;
+			content: string;
+		}>;
+		if (rows.length > 0) {
+			using update = db.prepare("UPDATE working_memory SET content_norm = ? WHERE id = ?");
+			transaction(db, () => {
+				for (const row of rows) update.run(normalizeContentForDedup(row.content), row.id);
+			});
+		}
+	}
+	db.run("CREATE INDEX IF NOT EXISTS idx_wm_content_norm ON working_memory(content_norm)");
 
 	for (const table of ["working_memory", "episodic_memory"] as const) {
 		addColumnIfMissing(db, table, "author_id", "TEXT DEFAULT NULL");

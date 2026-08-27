@@ -8,7 +8,7 @@ import { EpisodicGraph } from "../episodic-graph";
 import { countExtractedFactCategories, extractFactCategoriesSafe } from "../extraction";
 import { getMnemopiRuntimeOptions, withMnemopiRuntimeOptions } from "../runtime-options";
 import { storeExtractedFactCategories } from "./consolidate";
-import { type EmbedItem, scheduleEmbedding, vecAvailable, vecInsert } from "./helpers";
+import { type EmbedItem, normalizeContentForDedup, scheduleEmbedding, vecAvailable, vecInsert } from "./helpers";
 import type {
 	BeamEvent,
 	BeamMemoryState,
@@ -157,8 +157,18 @@ function invalidateCaches(beam: BeamMemoryState): void {
 }
 
 function findDuplicate(beam: BeamMemoryState, content: string): string | null {
-	using statement = beam.db.prepare("SELECT id FROM working_memory WHERE content = ? AND session_id = ? LIMIT 1");
-	const row = statement.get(content, beam.sessionId) as { id: string } | null;
+	// Cross-session by design: the same lesson relearned in a later session
+	// (the common case for a per-turn capture loop) is still the same lesson.
+	// content_norm also absorbs punctuation/casing/whitespace variation that
+	// an exact `content = ?` match on the previous version of this check
+	// would have missed.
+	const normalized = normalizeContentForDedup(content);
+	// A key that normalizes to empty (e.g. punctuation-only content) isn't a
+	// meaningful dedup signal -- matching on it would treat unrelated
+	// near-empty memories as duplicates of each other.
+	if (normalized.length === 0) return null;
+	using statement = beam.db.prepare("SELECT id FROM working_memory WHERE content_norm = ? LIMIT 1");
+	const row = statement.get(normalized) as { id: string } | null;
 	return row?.id ?? null;
 }
 
@@ -464,7 +474,7 @@ export function remember(beam: BeamMemoryState, content: string, options: StoreR
 					trust_tier = COALESCE(?, trust_tier),
 					embed_text = COALESCE(?, embed_text),
 					consolidated_at = NULL
-				WHERE id = ? AND session_id = ?
+				WHERE id = ?
 			`,
 			[
 				importance,
@@ -481,7 +491,6 @@ export function remember(beam: BeamMemoryState, content: string, options: StoreR
 				trustTier,
 				storedEmbeddingText(content, embedText),
 				existingId,
-				beam.sessionId,
 			],
 		);
 		emitEvent(beam, "MEMORY_UPDATED", {
@@ -500,13 +509,14 @@ export function remember(beam: BeamMemoryState, content: string, options: StoreR
 	beam.db.run(
 		`
 			INSERT INTO working_memory
-			(id, content, embed_text, source, timestamp, session_id, importance, metadata_json, valid_until, scope,
-			 author_id, author_type, channel_id, veracity, memory_type, trust_tier)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(id, content, content_norm, embed_text, source, timestamp, session_id, importance, metadata_json,
+			 valid_until, scope, author_id, author_type, channel_id, veracity, memory_type, trust_tier)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		`,
 		[
 			memoryId,
 			content,
+			normalizeContentForDedup(content),
 			storedEmbeddingText(content, embedText),
 			source,
 			timestamp,

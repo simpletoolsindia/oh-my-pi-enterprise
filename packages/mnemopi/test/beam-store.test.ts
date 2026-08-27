@@ -102,6 +102,57 @@ describe("beam store free functions", () => {
 		expect(ftsRows.map(row => row.id)).toEqual([id]);
 	});
 
+	it("deduplicates across sessions and past punctuation/casing/whitespace variation", () => {
+		// Two sessions sharing one physical DB -- the common case for the same
+		// lesson relearned in a later session, which the previous
+		// `content = ? AND session_id = ?` check could never catch.
+		const db = openDatabase(":memory:");
+		initBeam(db);
+		const sharedFields = {
+			db,
+			dbPath: ":memory:",
+			authorId: "author-a",
+			authorType: "user" as const,
+			channelId: "channel-a",
+			useCloud: false,
+			pluginManager: null,
+			annotations: null,
+			triples: null,
+			episodicGraph: null,
+			veracityConsolidator: null,
+			config: {
+				workingMemoryLimit: 1000,
+				workingMemoryTtlHours: 24,
+				recencyHalflifeHours: 72,
+				vecWeight: 0.5,
+				ftsWeight: 0.3,
+				importanceWeight: 0.2,
+				useCloud: false,
+				localLlmEnabled: false,
+				maxEpisodeChars: 100_000,
+			},
+		};
+		const beamA: BeamMemoryState = {
+			...sharedFields,
+			sessionId: "session-a",
+			caches: { timestampParse: new Map(), extractionBuffer: [] },
+		};
+		const beamB: BeamMemoryState = {
+			...sharedFields,
+			sessionId: "session-b",
+			caches: { timestampParse: new Map(), extractionBuffer: [] },
+		};
+
+		const id = remember(beamA, "Use uv, not pip.", { importance: 0.6 });
+		const duplicate = remember(beamB, "  use   UV, not pip  ", { importance: 0.9 });
+
+		expect(duplicate).toBe(id);
+		const row = get(beamA, id);
+		// Importance reinforces via MAX rather than being overwritten downward.
+		expect(row?.importance).toBe(0.9);
+		db.close();
+	});
+
 	it("batch remembers items and returns context ordered by global scope, importance, then recency", () => {
 		const beam = makeState();
 		// Timestamps must stay inside the 24h working-memory TTL or trimWorkingMemory
