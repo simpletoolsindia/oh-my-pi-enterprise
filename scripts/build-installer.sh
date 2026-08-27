@@ -84,7 +84,7 @@ if [ -f "$MODELS_FILE" ]; then
     echo "(To redo setup, delete that file and re-run this installer.)"
 else
     echo "Set up your custom OpenAI-compatible model provider."
-    echo "(This is the only provider omp talks to — no other API is called.)"
+    echo "(Every model call goes here and nowhere else. omp never phones home.)"
     echo ""
 
     while :; do
