@@ -37,6 +37,9 @@ class CodegraphScanOverlayComponent implements Component, OverlayFocusOwner {
 	#status = "Starting…";
 	#tick = 0;
 	#timer: ReturnType<typeof setInterval> | undefined;
+	/** Aborts the in-flight scan when the user presses Esc. */
+	readonly #skip = new AbortController();
+	#skipped = false;
 
 	constructor(readonly ctx: InteractiveModeContext) {}
 
@@ -48,10 +51,16 @@ class CodegraphScanOverlayComponent implements Component, OverlayFocusOwner {
 	async run(cwd: string, signal?: AbortSignal): Promise<void> {
 		this.#startTimer();
 		this.ctx.ui.requestRender();
+		// Compose the caller's shutdown signal with the Esc-to-skip control so
+		// either can end the scan.
+		const composed = signal ? AbortSignal.any([signal, this.#skip.signal]) : this.#skip.signal;
 		try {
-			await buildIndex(cwd, stage => this.setStatus(stage), signal);
+			await buildIndex(cwd, stage => this.setStatus(stage), composed);
 		} catch (error) {
-			logger.warn("Code graph initial scan failed", { error: String(error) });
+			// A skip is a deliberate user action, not a failure: the tool
+			// rebuilds the index on demand the first time it is actually used.
+			if (this.#skipped) logger.debug("Code graph initial scan skipped by user");
+			else logger.warn("Code graph initial scan failed", { error: String(error) });
 		} finally {
 			this.#stopTimer();
 		}
@@ -65,17 +74,25 @@ class CodegraphScanOverlayComponent implements Component, OverlayFocusOwner {
 		return component === this;
 	}
 
-	// Blocking startup step — no user input is accepted (nothing to cancel into;
-	// the scan runs to completion or the process is interrupted like any other
-	// startup work).
-	handleInput(): void {}
+	/**
+	 * Esc abandons the scan and drops straight into the session. Indexing a
+	 * large repository takes tens of seconds, and blocking the prompt that long
+	 * with no way out is the wrong trade when the `codegraph` tool can rebuild
+	 * the index lazily on its first real use.
+	 */
+	handleInput(data: string): void {
+		if (data !== "\x1b" || this.#skipped) return;
+		this.#skipped = true;
+		this.setStatus("Skipping…");
+		this.#skip.abort();
+	}
 
 	render(width: number): readonly string[] {
 		const w = Math.max(20, width);
 		const border = theme.fg("border", theme.boxRound.horizontal.repeat(w));
 		const title = theme.fg("accent", "Indexing code graph") + theme.fg("muted", " (first run for this project)");
 		const bar = marqueeBar(this.#tick, Math.max(8, w - 4));
-		const status = theme.fg("muted", this.#status);
+		const status = theme.fg("muted", `${this.#status}  `) + theme.fg("border", "esc to skip");
 		return [border, padLine(` ${title}`, w), padLine(` ${bar}`, w), padLine(` ${status}`, w), border];
 	}
 

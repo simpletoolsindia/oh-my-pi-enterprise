@@ -202,14 +202,16 @@ describe("manage_skill execute", () => {
 describe("learn execute", () => {
 	let tempHome: string;
 	let remembered: string[];
+	let rememberedOptions: Array<{ importance?: number }>;
 	let originalAgentDir: string;
 
 	function learnSession(): ToolSession {
 		const fakeState = {
 			sessionId: "sess-1",
 			session: { sessionManager: { getCwd: () => "/tmp/work" } },
-			rememberScoped: (memory: string) => {
+			rememberScoped: (memory: string, options?: { importance?: number }) => {
 				remembered.push(memory);
+				rememberedOptions.push(options ?? {});
 				return "mem-id";
 			},
 		};
@@ -225,6 +227,7 @@ describe("learn execute", () => {
 		spyOn(os, "homedir").mockReturnValue(tempHome);
 		setAgentDir(path.join(tempHome, ".omp", "agent"));
 		remembered = [];
+		rememberedOptions = [];
 	});
 
 	afterEach(async () => {
@@ -238,6 +241,28 @@ describe("learn execute", () => {
 		expect(remembered).toEqual(["Prefer Bun.file over readFileSync."]);
 		// No managed skills written.
 		expect(await fs.readdir(getManagedSkillsDir()).catch(() => [])).toHaveLength(0);
+	});
+
+	it("stores a plain lesson at the convention importance by default", async () => {
+		await new LearnTool(learnSession()).execute("1a", { memory: "Prefer Bun.file over readFileSync." });
+		expect(rememberedOptions[0]?.importance).toBe(0.6);
+	});
+
+	it("weights a correction-triggered lesson higher than a plain convention", async () => {
+		await new LearnTool(learnSession()).execute("1b", {
+			memory: "The build script needs --no-cache on this CI image.",
+			trigger: "correction",
+		});
+		expect(rememberedOptions[0]?.importance).toBe(0.9);
+	});
+
+	it("bumps importance further when a correction ships with a skill payload", async () => {
+		await new LearnTool(learnSession()).execute("1c", {
+			memory: "Retry the flaky publish step with backoff.",
+			trigger: "correction",
+			skill: { action: "create", name: "flaky-publish-retry", description: "Retry publish.", body: "# Retry" },
+		});
+		expect(rememberedOptions[0]?.importance).toBe(1);
 	});
 
 	it("stores a lesson AND mints a managed skill when a skill payload is given", async () => {

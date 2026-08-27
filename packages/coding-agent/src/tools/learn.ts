@@ -9,6 +9,9 @@ import type { ToolSession } from ".";
 const learnSchema = type({
 	memory: type("string").describe("the durable, self-contained lesson to remember (what, when, why)"),
 	"context?": type("string").describe("optional source context for the lesson"),
+	"trigger?": type("'correction' | 'convention'").describe(
+		"'correction' = this fixes a tool call, approach, or assumption that actually failed this session (weighted higher, so it outranks routine notes in future recall). 'convention' (default) = a durable fact, project convention, or preference noticed without a prior failure.",
+	),
 	"skill?": type({
 		action: "'create' | 'update'",
 		name: type("string").describe("kebab-case skill name"),
@@ -18,6 +21,22 @@ const learnSchema = type({
 });
 
 export type LearnParams = typeof learnSchema.infer;
+
+/**
+ * Every learned lesson used to store at a flat 0.8 importance, so the
+ * recall ranker couldn't distinguish a load-bearing correction from a
+ * routine note, and a lesson re-confirmed multiple times looked identical
+ * to one seen once. Derive it from the signal the model already has when
+ * it decides to call `learn`: a correction (something that actually broke)
+ * ranks above a plain convention, and pairing the lesson with a managed
+ * skill (evidence it's reusable enough to codify as a procedure) bumps it
+ * further.
+ */
+function deriveImportance(params: LearnParams): number {
+	let importance = params.trigger === "correction" ? 0.9 : 0.6;
+	if (params.skill) importance = Math.min(1, importance + 0.1);
+	return importance;
+}
 
 /**
  * Orchestrating "learn" tool: persists a lesson to long-term memory and,
@@ -52,6 +71,7 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 		// 1) Persist or queue the lesson to long-term memory (mirrors MemoryRetainTool).
 		const backend = this.session.settings.get("memory.backend");
 		const memoryMessage = "Lesson stored";
+		const importance = deriveImportance(params);
 		if (backend === "mnemopi") {
 			const state = this.session.getMnemopiSessionState?.();
 			if (!state) {
@@ -59,7 +79,7 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 			}
 			const id = state.rememberScoped(params.memory, {
 				source: "coding-agent-learn",
-				importance: 0.8,
+				importance,
 				metadata: {
 					session_id: state.sessionId,
 					cwd: state.session.sessionManager.getCwd(),
@@ -81,7 +101,7 @@ export class LearnTool implements AgentTool<typeof learnSchema> {
 		} else if (backend === "local") {
 			const result = await localBackend.save?.(
 				{ agentDir: this.session.settings.getAgentDir(), cwd: this.session.settings.getCwd() },
-				{ content: params.memory, context: params.context, source: "coding-agent-learn", importance: 0.8 },
+				{ content: params.memory, context: params.context, source: "coding-agent-learn", importance },
 			);
 			if (!result || result.stored === 0) {
 				throw new Error("Lesson was empty after sanitization; nothing stored.");

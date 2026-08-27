@@ -269,31 +269,22 @@ export function autoMigrateEnabled(env: Env = process.env): boolean {
 }
 
 export interface RecallFeatureFlags {
-	polyphonicRecall?: boolean;
 	enhancedRecall?: boolean;
 	proactiveLinking?: boolean;
 }
 
-let polyphonicRecallDefault = true;
 let enhancedRecallDefault = true;
 let proactiveLinkingDefault = true;
 
 /**
  * Sets process-wide defaults for the env-gated recall features. Host configuration
- * (e.g. the coding-agent `mnemopi.polyphonicRecall` / `mnemopi.enhancedRecall` /
- * `mnemopi.proactiveLinking` settings) lands here; the `MNEMOPI_POLYPHONIC_RECALL` /
- * `MNEMOPI_ENHANCED_RECALL` / `MNEMOPI_PROACTIVE_LINKING` environment variables still
- * win whenever they are set.
+ * (e.g. the coding-agent `mnemopi.enhancedRecall` / `mnemopi.proactiveLinking`
+ * settings) lands here; the `MNEMOPI_ENHANCED_RECALL` / `MNEMOPI_PROACTIVE_LINKING`
+ * environment variables still win whenever they are set.
  */
 export function configureRecallFeatures(flags: RecallFeatureFlags): void {
-	if (flags.polyphonicRecall !== undefined) polyphonicRecallDefault = flags.polyphonicRecall;
 	if (flags.enhancedRecall !== undefined) enhancedRecallDefault = flags.enhancedRecall;
 	if (flags.proactiveLinking !== undefined) proactiveLinkingDefault = flags.proactiveLinking;
-}
-
-export function polyphonicRecallEnabled(env: Env = process.env): boolean {
-	const value = envOptionalString("MNEMOPI_POLYPHONIC_RECALL", env);
-	return value === undefined ? polyphonicRecallDefault : value === "1";
 }
 
 export function temporalHalflifeHours(env: Env = process.env): number {

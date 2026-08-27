@@ -1138,6 +1138,26 @@ export interface AutoLearnCaptureRunnerOptions {
 	onPayload?: SimpleStreamOptions["onPayload"];
 	onResponse?: SimpleStreamOptions["onResponse"];
 	createSessionId?: () => string;
+	/**
+	 * Trim the detached capture transcript to the last N user-message-bounded
+	 * turns (default 2) instead of resending the entire source conversation.
+	 * The nudge only asks about "your previous turn," so the rest is pure
+	 * token waste -- on a long session this is most of the cost of a capture.
+	 */
+	contextTurns?: number;
+}
+
+/** Trim `messages` to the last `turns` user-message-bounded turns (from the Nth-from-last user message onward). */
+function sliceToLastUserTurns(messages: readonly AgentMessage[], turns: number): AgentMessage[] {
+	if (messages.length === 0 || turns <= 0) return [];
+	let userTurnsSeen = 0;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i]?.role === "user") {
+			userTurnsSeen++;
+			if (userTurnsSeen >= turns) return messages.slice(i) as AgentMessage[];
+		}
+	}
+	return [...messages];
 }
 
 /** Build a private capture runner over a detached message snapshot and provider session. */
@@ -1151,15 +1171,17 @@ export function createAutoLearnCaptureRunner(
 
 		const captureSessionId = options.createSessionId?.() ?? Bun.randomUUIDv7();
 		const captureProviderSessionState = new Map<string, ProviderSessionState>();
-		const captureMessages = options.sourceAgent.state.messages.map((message): AgentMessage => {
-			if (message.role === "assistant") {
-				return { ...message, responseId: undefined, providerPayload: undefined };
-			}
-			if (message.role === "user" || message.role === "developer") {
-				return { ...message, providerPayload: undefined };
-			}
-			return message;
-		});
+		const captureMessages = sliceToLastUserTurns(options.sourceAgent.state.messages, options.contextTurns ?? 2).map(
+			(message): AgentMessage => {
+				if (message.role === "assistant") {
+					return { ...message, responseId: undefined, providerPayload: undefined };
+				}
+				if (message.role === "user" || message.role === "developer") {
+					return { ...message, providerPayload: undefined };
+				}
+				return message;
+			},
+		);
 		const captureAgent = options.createAgent({
 			initialState: {
 				systemPrompt: [...options.sourceAgent.state.systemPrompt],
@@ -3919,6 +3941,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 		const runAutoLearnCapture = createAutoLearnCaptureRunner({
 			sourceAgent: agent,
 			captureTools: autoLearnCaptureTools,
+			contextTurns: settings.get("autolearn.captureContextTurns"),
 			onPayload,
 			onResponse,
 			createAgent: captureOptions => {

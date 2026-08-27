@@ -95,6 +95,23 @@ export function generateStableId(content: string, source = ""): string {
 	return stableMemoryId(content, source);
 }
 
+/**
+ * Normalize content for cross-session duplicate detection: lowercase,
+ * collapse whitespace, and strip punctuation, so "Use uv, not pip." and
+ * "use uv not pip" resolve to the same key. Exact-match only -- it does not
+ * catch paraphrases -- but that's the gap `remember()`'s previous
+ * `content = ? AND session_id = ?` check had too; this widens what counts as
+ * "the same lesson" (surface variation, any session) without attempting
+ * semantic dedup.
+ */
+export function normalizeContentForDedup(content: string): string {
+	return content
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}\s]+/gu, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+}
+
 export function normalizeWeights(
 	vecWeight: number | null | undefined,
 	ftsWeight: number | null | undefined,

@@ -46,8 +46,18 @@ class FakeSession {
 
 	toolCalls(n: number): void {
 		for (let i = 0; i < n; i++) {
-			this.emit({ type: "tool_execution_end", toolCallId: `t${i}`, toolName: "read", result: null });
+			this.emit({ type: "tool_execution_end", toolCallId: `t${i}`, toolName: "read", result: null, isError: false });
 		}
+	}
+
+	toolError(): void {
+		this.emit({
+			type: "tool_execution_end",
+			toolCallId: `err${Math.random()}`,
+			toolName: "bash",
+			result: null,
+			isError: true,
+		});
 	}
 
 	agentStart(): void {
@@ -135,19 +145,35 @@ function interactionsResponse(): Response {
 }
 
 describe("AutoLearnController", () => {
-	it("does not inject a passive nudge into the conversation prefix", () => {
+	it("fires after a turn with at least one tool error, when autoContinue is on", () => {
+		const session = new FakeSession();
+		install(session, { "autolearn.autoContinue": true });
+		session.toolCalls(2);
+		session.toolError();
+		session.agentEnd();
+		expect(session.captures).toHaveLength(1);
+	});
+
+	it("fires by default, with no explicit autoContinue override", () => {
 		const session = new FakeSession();
 		install(session);
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
+		expect(session.captures).toHaveLength(1);
+	});
 
+	it("does not fire when no tool call errored, no matter how many tool calls ran", () => {
+		const session = new FakeSession();
+		install(session, { "autolearn.autoContinue": true });
+		session.toolCalls(20);
+		session.agentEnd();
 		expect(session.captures).toHaveLength(0);
 	});
 
-	it("does not nudge below the threshold", () => {
+	it("does not fire when autoContinue is explicitly disabled, even with an error", () => {
 		const session = new FakeSession();
-		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(4);
+		install(session, { "autolearn.autoContinue": false });
+		session.toolError();
 		session.agentEnd();
 		expect(session.captures).toHaveLength(0);
 	});
@@ -156,30 +182,31 @@ describe("AutoLearnController", () => {
 		const session = new FakeSession();
 		session.planEnabled = true;
 		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
-		expect(session.captures).toHaveLength(0);
-	});
-	it("does not combine tool calls across separate sub-threshold turns", () => {
-		const session = new FakeSession();
-		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(3);
-		session.agentEnd();
-		session.toolCalls(3);
-		session.agentEnd();
-		// Neither turn reached the threshold; the counter must not accumulate.
 		expect(session.captures).toHaveLength(0);
 	});
 
-	it("discards plan-mode tool calls instead of leaking them into the next turn", () => {
+	it("does not combine tool errors across separate error-free turns", () => {
+		const session = new FakeSession();
+		install(session, { "autolearn.autoContinue": true });
+		session.toolCalls(3);
+		session.agentEnd();
+		session.toolCalls(3);
+		session.agentEnd();
+		// Neither turn had an error; the per-turn counter must not accumulate.
+		expect(session.captures).toHaveLength(0);
+	});
+
+	it("discards plan-mode tool errors instead of leaking them into the next turn", () => {
 		const session = new FakeSession();
 		session.planEnabled = true;
 		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd(); // plan mode: no fire, counter reset
 		session.planEnabled = false;
 		session.toolCalls(1);
-		session.agentEnd(); // 1 < threshold -> no fire (no plan-mode leak)
+		session.agentEnd(); // no error this turn -> no fire (no plan-mode leak)
 		expect(session.captures).toHaveLength(0);
 	});
 
@@ -194,15 +221,15 @@ describe("AutoLearnController", () => {
 			settings,
 			capture: content => session.capture(content),
 		});
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		expect(session.captures).toHaveLength(1); // fires while enabled
 		settings.set("autolearn.enabled", false);
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		expect(session.captures).toHaveLength(1); // no new nudge after disable
-		// The disabled stop must NOT leave its tool calls queued: re-enabling and
-		// doing a sub-threshold turn must not fire from leaked counts.
+		// The disabled stop must NOT leave its error queued: re-enabling and
+		// doing an error-free turn must not fire from a leaked count.
 		settings.set("autolearn.enabled", true);
 		session.toolCalls(1);
 		session.agentEnd();
@@ -213,13 +240,13 @@ describe("AutoLearnController", () => {
 		const session = new FakeSession();
 		session.goalEnabled = true;
 		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		// Goal mode owns the continuation; auto-learn stays out of the loop.
 		expect(session.captures).toHaveLength(0);
 		// The skipped stop must not arm suppression for the next non-goal stop.
 		session.goalEnabled = false;
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		expect(session.captures).toHaveLength(1);
 	});
@@ -230,7 +257,7 @@ describe("AutoLearnController", () => {
 		install(session, { "autolearn.autoContinue": true });
 		// The turn begins as a goal continuation...
 		session.agentStart();
-		session.toolCalls(5);
+		session.toolError();
 		// ...then a `goal` tool completes/drops the goal mid-turn: the live flag is
 		// off by the time the turn stops, but this turn must still never be nudged.
 		session.goalEnabled = false;
@@ -240,7 +267,7 @@ describe("AutoLearnController", () => {
 		// The capture is per-turn: a fresh turn that did not start in goal mode
 		// nudges normally, proving the latch resets.
 		session.agentStart();
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		expect(session.captures).toHaveLength(1);
 	});
@@ -250,18 +277,18 @@ describe("AutoLearnController", () => {
 		const release = Promise.withResolvers<void>();
 		session.captureGate = release.promise;
 		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		expect(session.captures).toHaveLength(1);
 		session.captureGate = undefined;
 		release.resolve();
 		await settleCaptures();
 		expect(session.captures).toHaveLength(2);
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		await settleCaptures();
 		expect(session.captures).toHaveLength(3);
@@ -272,9 +299,9 @@ describe("AutoLearnController", () => {
 		const release = Promise.withResolvers<void>();
 		session.captureGate = release.promise;
 		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
-		session.toolCalls(4);
+		session.toolCalls(4); // no error this turn -> ineligible
 		session.agentEnd();
 		session.captureGate = undefined;
 		release.resolve();
@@ -286,29 +313,20 @@ describe("AutoLearnController", () => {
 		const session = new FakeSession();
 		session.captureError = new Error("capture failed");
 		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		await settleCaptures();
 		session.captureError = undefined;
-		session.toolCalls(5);
+		session.toolError();
 		session.agentEnd();
 		await settleCaptures();
 		expect(session.captures).toHaveLength(2);
 	});
 
-	it("respects a custom minToolCalls threshold", async () => {
-		const session = new FakeSession();
-		install(session, { "autolearn.autoContinue": true, "autolearn.minToolCalls": 2 });
-		session.toolCalls(2);
-		session.agentEnd();
-		await settleCaptures();
-		expect(session.captures).toHaveLength(1);
-	});
-
 	it("does not nudge when the turn ended with stopReason aborted", () => {
 		const session = new FakeSession();
 		install(session, { "autolearn.autoContinue": true });
-		session.toolCalls(5);
+		session.toolError();
 		const abortedMessage: AssistantMessage = {
 			role: "assistant",
 			content: [{ type: "text", text: "partial" }],
@@ -419,6 +437,59 @@ describe("isolated auto-learn capture", () => {
 		expect(sourceAssistant?.responseId).toBe("primary-interaction");
 		expect(sourceAgent.peekSteeringQueue()).toEqual([queuedUserMessage]);
 		expect(primaryEvents).toBe(0);
+	});
+
+	it("trims the detached transcript to the last contextTurns instead of resending the whole conversation", async () => {
+		const manageSkillTool = captureTool("manage_skill", "Manage reusable skills");
+		const captureMock = createMockModel({ responses: [{ content: ["Captured."] }] });
+		const sourceAgent = new Agent({
+			initialState: {
+				model: captureMock,
+				systemPrompt: ["Test"],
+				tools: [manageSkillTool],
+				messages: [
+					{ role: "user", content: "Turn one: ancient history", timestamp: 1 },
+					{
+						role: "assistant",
+						content: [{ type: "text", text: "Turn one reply" }],
+						api: "anthropic-messages",
+						provider: "anthropic",
+						model: "mock",
+						usage: ZERO_USAGE,
+						stopReason: "stop",
+						timestamp: 2,
+					},
+					{ role: "user", content: "Turn two: the failing command", timestamp: 3 },
+					{
+						role: "assistant",
+						content: [{ type: "text", text: "Turn two reply" }],
+						api: "anthropic-messages",
+						provider: "anthropic",
+						model: "mock",
+						usage: ZERO_USAGE,
+						stopReason: "stop",
+						timestamp: 4,
+					},
+				],
+			},
+		});
+		let captureMessages: AgentMessage[] = [];
+		const runCapture = createAutoLearnCaptureRunner({
+			sourceAgent,
+			captureTools: [manageSkillTool],
+			contextTurns: 1,
+			createAgent: options => {
+				captureMessages = options.initialState?.messages ?? [];
+				return new Agent({ ...options, convertToLlm, streamFn: captureMock.stream });
+			},
+		});
+
+		await runCapture("Automated capture prompt");
+
+		const captureText = JSON.stringify(captureMessages);
+		expect(captureText).toContain("Turn two: the failing command");
+		expect(captureText).toContain("Turn two reply");
+		expect(captureText).not.toContain("Turn one");
 	});
 
 	it("forwards provider lifecycle hooks to the detached capture", async () => {

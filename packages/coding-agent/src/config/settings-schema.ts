@@ -2833,18 +2833,21 @@ export const SETTINGS_SCHEMA = {
 	},
 	"autolearn.autoContinue": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
 			tab: "memory",
 			group: "Auto-Learn",
 			label: "Auto-run capture at stop",
 			description:
-				"When on, auto-run one private capture turn at stop (uses extra tokens). When off, only standing auto-learn guidance remains.",
+				"When on, auto-run one private capture turn after a turn with a tool error (context trimmed to the last few turns, so it's cheap). When off, only standing auto-learn guidance remains.",
 			condition: "autolearnActive",
 		},
 	},
 	// Config-file-only knob (numbers without `options` are hidden from the UI).
-	"autolearn.minToolCalls": { type: "number", default: 5 },
+	// The capture nudge only asks about "your previous turn," so resending the
+	// full transcript on every capture is pure waste -- trim to the last few
+	// turns instead.
+	"autolearn.captureContextTurns": { type: "number", default: 2 },
 
 	// Mnemopi local SQLite memory backend.
 	"mnemopi.dbPath": {
@@ -2943,17 +2946,6 @@ export const SETTINGS_SCHEMA = {
 			group: "Mnemopi",
 			label: "Mnemopi Auto Retain",
 			description: "Retain completed conversation turns into local Mnemopi memory",
-			condition: "mnemopiActive",
-		},
-	},
-	"mnemopi.polyphonicRecall": {
-		type: "boolean",
-		default: true,
-		ui: {
-			tab: "memory",
-			group: "Mnemopi",
-			label: "Mnemopi Polyphonic Recall",
-			description: "Enable 4-voice recall (vector, graph, fact, temporal) fused with reciprocal rank fusion",
 			condition: "mnemopiActive",
 		},
 	},

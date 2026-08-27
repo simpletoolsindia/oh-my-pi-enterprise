@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { transaction } from "../../db";
+import { normalizeContentForDedup } from "./helpers";
 
 type PragmaTableInfoRow = {
 	name: string;
@@ -293,8 +295,40 @@ export function initBeam(db: Database): void {
 	runAll(db, [
 		"CREATE INDEX IF NOT EXISTS idx_em_scope_imp ON episodic_memory(scope, importance) WHERE superseded_by IS NULL",
 		"CREATE INDEX IF NOT EXISTS idx_wm_session_recall ON working_memory(session_id, last_recalled) WHERE valid_until IS NULL",
-		"CREATE INDEX IF NOT EXISTS idx_mem_emb_type ON memory_embeddings(memory_id, model)",
+		// memory_id is already the table's PRIMARY KEY (its own unique index),
+		// and every query that filters on `model` does so without `memory_id`
+		// in the WHERE clause -- a compound index can't serve a lookup that
+		// only constrains its second column. Drop it: no query benefits, and
+		// it costs a write on every embedding insert/update.
+		"DROP INDEX IF EXISTS idx_mem_emb_type",
+		// allVisibleIds()'s WHERE is `(session_id = ? OR scope = 'global') AND
+		// superseded_by IS NULL ORDER BY timestamp DESC` -- the OR across two
+		// different columns defeats idx_wm_session, leaving idx_wm_timestamp to
+		// serve the sort over the *entire* table, superseded rows included.
+		// This covers the superseded_by filter first, then the timestamp sort.
+		"CREATE INDEX IF NOT EXISTS idx_wm_superseded_timestamp ON working_memory(superseded_by, timestamp)",
+		"CREATE INDEX IF NOT EXISTS idx_em_superseded_timestamp ON episodic_memory(superseded_by, timestamp)",
 	]);
+
+	// Duplicate detection used to be `content = ? AND session_id = ?`: an exact
+	// string match scoped to one session, so the same lesson relearned in a
+	// later session (the common case for a per-turn capture loop) never
+	// deduped, and surface variation (punctuation, casing, whitespace) always
+	// missed. `content_norm` holds a normalized form so lookups can match
+	// across sessions and past cosmetic differences.
+	if (addColumnIfMissing(db, "working_memory", "content_norm", "TEXT DEFAULT NULL")) {
+		const rows = db.query("SELECT id, content FROM working_memory").all() as Array<{
+			id: string;
+			content: string;
+		}>;
+		if (rows.length > 0) {
+			using update = db.prepare("UPDATE working_memory SET content_norm = ? WHERE id = ?");
+			transaction(db, () => {
+				for (const row of rows) update.run(normalizeContentForDedup(row.content), row.id);
+			});
+		}
+	}
+	db.run("CREATE INDEX IF NOT EXISTS idx_wm_content_norm ON working_memory(content_norm)");
 
 	for (const table of ["working_memory", "episodic_memory"] as const) {
 		addColumnIfMissing(db, table, "author_id", "TEXT DEFAULT NULL");
