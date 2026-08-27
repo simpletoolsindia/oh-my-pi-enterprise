@@ -136,10 +136,14 @@ describe("QueryCache", () => {
 		});
 	});
 
-	it("keeps enhanced recall and query cache disabled unless the Python env gate is set", () => {
-		expect(isEnhancedRecallEnabled({})).toBe(false);
-		expect(isQueryCacheEnabled(true, {})).toBe(false);
+	it("enables enhanced recall by default and lets the env var force it off", () => {
+		// Enhanced recall ships on: memory is a headline feature of this build,
+		// so the query cache backing it is enabled unless explicitly disabled.
+		expect(isEnhancedRecallEnabled({})).toBe(true);
+		expect(isQueryCacheEnabled(true, {})).toBe(true);
 		expect(isQueryCacheEnabled(true, { MNEMOPI_ENHANCED_RECALL: "0" })).toBe(false);
+		// The caller's own gate still wins: passing `false` disables the cache
+		// no matter what the env var says.
 		expect(isQueryCacheEnabled(false, { MNEMOPI_ENHANCED_RECALL: "1" })).toBe(false);
 		expect(isQueryCacheEnabled(true, { MNEMOPI_ENHANCED_RECALL: "1" })).toBe(true);
 	});

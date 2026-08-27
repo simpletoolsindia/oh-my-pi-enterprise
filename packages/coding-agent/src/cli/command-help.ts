@@ -70,6 +70,10 @@ export const psHelp = {
 	description: "List and control daemon-supervised background processes (logs, stop, kill, restart)",
 } satisfies CommandMetadata;
 
+export const perfHelp = {
+	description: "Measure local performance: startup, native addon, grep, glob, memory, and codegraph latencies",
+} satisfies CommandMetadata;
+
 export const readHelp = {
 	description: "Show what the read tool will return for a path, URL, or internal URI",
 } satisfies CommandMetadata;

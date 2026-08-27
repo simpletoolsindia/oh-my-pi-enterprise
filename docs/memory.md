@@ -1,6 +1,6 @@
 # Autonomous Memory
 
-Oh My Pi supports four memory modes. Memory is disabled by default; select one backend via `/settings` or `config.yml`:
+Oh My Pi supports four memory modes. In this build, memory defaults to `mnemopi` (local SQLite); change the backend via `/settings` or `config.yml`:
 
 | `memory.backend` | Storage and behavior                                                   | Guide                                                   |
 | ---------------- | ---------------------------------------------------------------------- | ------------------------------------------------------- |
@@ -49,7 +49,7 @@ The agent can read memory files directly using `memory://` URLs with the `read` 
 
 ### Capturing lessons
 
-Enable `autolearn.enabled` to make the `learn` tool available:
+Enable `autolearn.enabled` to make the `learn` tool available (enabled by default in this build):
 
 ```yaml
 autolearn:
@@ -103,7 +103,7 @@ If the requested memory role is not configured, memory model resolution falls ba
 
 | Setting                               | Default | Description                                                                                                                              |
 | ------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `memory.backend`                      | `off`   | Select `local` for this pipeline; legacy `memories.enabled: true` is migrated to `memory.backend: local` when no explicit backend is set |
+| `memory.backend`                      | `mnemopi` | Active memory backend; `off` disables memory entirely, `local` uses the rollout-summary pipeline, `mnemopi` uses local SQLite recall/retain                                          |
 | `memories.maxRolloutAgeDays`          | `30`    | Sessions older than this are not processed                                                                                               |
 | `memories.minRolloutIdleHours`        | `12`    | Sessions active more recently than this are skipped                                                                                      |
 | `memories.maxRolloutsPerStartup`      | `64`    | Cap on sessions processed in a single startup                                                                                            |

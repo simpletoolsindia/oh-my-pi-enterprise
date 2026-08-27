@@ -140,15 +140,19 @@ describe("provider all-tools parity", () => {
 		expect(diagnose.status).toBe("ok");
 		expect(diagnose.db_path).toContain("banks/ops/mnemopi.db");
 		const graphQuery = await handleToolCall("mnemopi_graph_query", { seed_memory_id: memoryId, bank: "ops" });
+		// Proactive linking is on by default, so `remember` ingests the memory
+		// into the episodic graph as it is stored. The seed therefore already
+		// has a relationship (its own gist, linked by a `ctx` edge) rather than
+		// the empty graph this asserted back when linking defaulted off.
+		// Assert the shape, not the generated gist id.
 		expect(graphQuery).toMatchObject({
 			status: "ok",
 			seed_memory_id: memoryId,
-			count: 0,
-			results_count: 0,
-			results: [],
-			related_memories: [],
 			bank: "ops",
 		});
+		expect(graphQuery.count).toBe(1);
+		expect(graphQuery.results_count).toBe(1);
+		expect(graphQuery.results).toMatchObject([{ depth: 1, edgeType: "ctx", weight: 1 }]);
 		expect(
 			await handleToolCall("mnemopi_graph_link", {
 				source_id: memoryId,

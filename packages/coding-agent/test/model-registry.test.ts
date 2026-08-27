@@ -1804,15 +1804,15 @@ describe("ModelRegistry", () => {
 
 	describe("cached discovery on startup", () => {
 		let legacySentinels: ModelRegistry;
-		let standardCache: ModelRegistry;
+		let _standardCache: ModelRegistry;
 		let specialCache: ModelRegistry;
-		let vertexAuthoritative: ModelRegistry;
-		let syntheticCacheLoad: ModelRegistry;
+		let _vertexAuthoritative: ModelRegistry;
+		let _syntheticCacheLoad: ModelRegistry;
 		let cachedDiscoverableRemoteCompaction: ModelRegistry;
-		let vertexNonAuthoritative: ModelRegistry;
-		let vertexStale: ModelRegistry;
+		let _vertexNonAuthoritative: ModelRegistry;
+		let _vertexStale: ModelRegistry;
 		let litellmStaleNamespaceCache: ModelRegistry;
-		let litellmCurrentNamespaceCache: ModelRegistry;
+		let _litellmCurrentNamespaceCache: ModelRegistry;
 		let openaiModelsListStaleNamespaceCache: ModelRegistry;
 		const vertexProjectModel = () =>
 			buildModel({
@@ -1874,7 +1874,7 @@ describe("ModelRegistry", () => {
 					},
 				},
 			);
-			standardCache = readonlyRegistry(
+			_standardCache = readonlyRegistry(
 				{ providers: {} },
 				{
 					seedCache: dbPath => {
@@ -1962,14 +1962,14 @@ describe("ModelRegistry", () => {
 					},
 				},
 			);
-			vertexAuthoritative = readonlyRegistry(
+			_vertexAuthoritative = readonlyRegistry(
 				{ providers: {} },
 				{
 					seedCache: dbPath =>
 						writeModelCache("google-vertex", Date.now(), [vertexProjectModel()], true, "", dbPath),
 				},
 			);
-			syntheticCacheLoad = readonlyRegistry(
+			_syntheticCacheLoad = readonlyRegistry(
 				{ providers: {} },
 				{
 					seedCache: dbPath =>
@@ -1996,14 +1996,14 @@ describe("ModelRegistry", () => {
 						),
 				},
 			);
-			vertexNonAuthoritative = readonlyRegistry(
+			_vertexNonAuthoritative = readonlyRegistry(
 				{ providers: {} },
 				{
 					seedCache: dbPath =>
 						writeModelCache("google-vertex", Date.now(), [vertexProjectModel()], false, "", dbPath),
 				},
 			);
-			vertexStale = readonlyRegistry(
+			_vertexStale = readonlyRegistry(
 				{ providers: {} },
 				{
 					// 25h old > 24h TTL → cache.fresh === false even though authoritative === true.
@@ -2098,7 +2098,7 @@ describe("ModelRegistry", () => {
 						dbPath,
 					),
 			});
-			litellmCurrentNamespaceCache = readonlyRegistry(litellmProxyConfig(), {
+			_litellmCurrentNamespaceCache = readonlyRegistry(litellmProxyConfig(), {
 				seedCache: dbPath =>
 					writeModelCache(
 						"litellm-proxy:litellm-rich-v3",
