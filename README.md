@@ -1,6 +1,8 @@
 # omp — self-hosted coding agent
 
-A terminal coding agent, locked down for internal/enterprise use: **one OpenAI-compatible provider you point it at**, no telemetry, no update checks, no remote tracking, no other API ever called. Code understanding, memory, and subagents all run locally against your own model server.
+A terminal coding agent, locked down for internal/enterprise use: **one OpenAI-compatible provider you point it at**, no telemetry, no update checks, no remote tracking. Code understanding, memory, and subagents all run locally against your own model server.
+
+**What "locked down" means precisely:** nothing phones home. There is no telemetry, no usage reporting, no version or update check, and no remote provider catalog — every model call goes to the one `baseUrl` in your config and nowhere else. Tools you explicitly invoke still reach the network when that is their job (`gh` talks to GitHub, `fetch` retrieves a URL, the web scrapers download a helper binary on first use). Those are user-initiated, not background.
 
 Fork of [oh-my-pi](https://github.com/can1357/oh-my-pi) (itself a fork of [Pi](https://github.com/badlogic/pi-mono) by [@mariozechner](https://github.com/mariozechner)), stripped down and re-pointed at a single self-hosted provider.
 
