@@ -613,4 +613,22 @@ export const BUILTIN_MODE_SLASH_COMMANDS: ReadonlyArray<SlashCommandSpec> = [
 			return commandConsumed();
 		},
 	},
+	{
+		name: "provider",
+		icon: "gear",
+		description: "Manage LLM providers: list, add, edit, test, reload",
+		allowArgs: true,
+		acpInputHint: "[list|add|edit|test|reload]",
+		subcommands: [
+			{ name: "list", description: "List configured providers and models" },
+			{ name: "add", description: "Create models.yml with a starter template" },
+			{ name: "edit", description: "Open models.yml in your editor" },
+			{ name: "test", description: "Test connectivity to all providers" },
+			{ name: "reload", description: "Reload models after manual config edits" },
+		],
+		handle: async (command, runtime) => {
+			const { handleProviderCommand } = await import("./helpers/provider");
+			return handleProviderCommand(command, runtime);
+		},
+	},
 ];

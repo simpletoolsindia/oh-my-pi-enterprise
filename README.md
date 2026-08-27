@@ -32,12 +32,16 @@ omp
 
 If you're running from source or want to configure manually:
 
-**Option A — Interactive UI:**
+**Option A — Interactive UI (inside omp):**
 
 ```sh
 omp
-# Inside the session, type:  /settings
-# Go to Providers tab → configure your server URL, key, and model
+# Inside the session, use the /provider command:
+/provider add       # creates models.yml with a starter template
+/provider edit      # opens models.yml in your editor
+/provider test      # tests connectivity to your server
+/provider reload    # reloads after you edit the config
+/provider           # lists current providers and models
 ```
 
 **Option B — Config file:**
@@ -144,7 +148,20 @@ omp stats              # Usage statistics dashboard
 omp --help             # Full command reference
 ```
 
-Inside a session: `/settings`, `/model`, `/memory`, `/compact`, `/tools`, `/help`
+Inside a session:
+
+| Command | What it does |
+|---------|-------------|
+| `/provider` | List, add, edit, test, reload LLM providers |
+| `/provider add` | Create models.yml with starter config |
+| `/provider test` | Test connection to all providers |
+| `/provider reload` | Pick up config changes without restarting |
+| `/model` | Switch between configured models |
+| `/settings` | Full settings UI |
+| `/memory` | View/manage memory state |
+| `/compact` | Compact conversation context |
+| `/tools` | List available tools |
+| `/help` | All commands |
 
 ---
 
