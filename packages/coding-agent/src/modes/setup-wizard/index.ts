@@ -4,7 +4,6 @@ import type { InteractiveModeContext } from "../types";
 import { composerSetupScene } from "./scenes/composer";
 import { glyphSetupScene } from "./scenes/glyph";
 import { modelSetupScene } from "./scenes/model";
-import { providersSetupScene } from "./scenes/providers";
 import { themeSetupScene } from "./scenes/theme";
 import type { SetupScene } from "./scenes/types";
 import { SetupWizardComponent } from "./wizard-overlay";
@@ -14,8 +13,11 @@ export type { SetupScene, SetupSceneController, SetupSceneHost, SetupSceneResult
 export { runStartupSplash } from "./startup-splash";
 export { CURRENT_SETUP_VERSION };
 
+// No provider sign-in step: this build authenticates one custom OpenAI-compatible
+// provider by api key in `models.yml`, and registers no OAuth providers, so that
+// scene could only ever render "No OAuth providers available" as a new user's
+// first impression.
 export const ALL_SCENES = [
-	providersSetupScene,
 	modelSetupScene,
 	glyphSetupScene,
 	composerSetupScene,
