@@ -3,6 +3,14 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { dbPath } from "./config";
 
+// Process-wide (per bun:sqlite docs, this is a static Database property, not
+// per-connection): the default of 20 cached prepared statements is easily
+// exhausted by a single recall() call, which prepares upward of a dozen
+// distinct SQL strings across its FTS/candidate/hydration/fact queries.
+// Raising it costs a little memory for compiled statement handles, nothing
+// more -- it does not change query semantics.
+if (Database.MAX_QUERY_CACHE_SIZE < 64) Database.MAX_QUERY_CACHE_SIZE = 64;
+
 export type SqlitePageSize = number | "os";
 
 const MIN_SQLITE_PAGE_SIZE = 512;
@@ -92,9 +100,25 @@ export function openDatabase(path: DatabasePath = dbPath(), options: OpenDatabas
 export function enablePragmas(db: Database, path?: DatabasePath, pageSize?: SqlitePageSize): void {
 	db.exec("PRAGMA foreign_keys=ON");
 	db.exec("PRAGMA busy_timeout=5000");
+	// Keep SQLite's own temp tables/indices (used by e.g. ORDER BY/GROUP BY
+	// spills on the recall queries) off disk -- this DB is small enough that
+	// the memory cost is negligible either way.
+	db.exec("PRAGMA temp_store=MEMORY");
+	// 8MB page cache: recall runs many small SELECTs per call against a
+	// working set that easily fits this budget on a per-project/per-user DB.
+	db.exec("PRAGMA cache_size=-8000");
 	if (path !== ":memory:") {
 		applyPageSize(db, path ?? dbPath(), pageSize);
 		db.exec("PRAGMA journal_mode=WAL");
+		// NORMAL is the standard pairing with WAL: still durable against an
+		// application crash (the common case here), just not against a power
+		// loss mid-checkpoint -- an acceptable tradeoff for a local memory
+		// index that trades some fsync overhead for much lower write latency.
+		db.exec("PRAGMA synchronous=NORMAL");
+		// Let the OS page cache serve reads directly instead of round-tripping
+		// through SQLite's own read() calls; 64MB is comfortably larger than
+		// this database is expected to be for a single project/user.
+		db.exec("PRAGMA mmap_size=67108864");
 	}
 }
 

@@ -433,8 +433,32 @@ function ftsQuery(query: string, useSynonyms = true): string {
 	return tokens.map(ftsPhrase).join(" OR ");
 }
 
+// Bun caches at most `Database.MAX_QUERY_CACHE_SIZE` prepared statements per
+// connection (LRU-evicted), keyed by exact SQL text. An IN (?,?,...) clause
+// sized to the caller's exact candidate count would mint a distinct SQL
+// string -- and therefore a fresh, uncached prepare -- for nearly every
+// recall call. Quantizing to power-of-two buckets caps the distinct arities
+// actually seen, so repeated calls reuse the same prepared statement; the
+// extra placeholders are bound to `NULL`, which never satisfies `IN (...)`,
+// so padding never changes which rows match.
+function quantizedArity(count: number): number {
+	if (count <= 0) return 0;
+	let size = 1;
+	while (size < count) size *= 2;
+	return size;
+}
+
 function placeholders(count: number): string {
-	return new Array<string>(count).fill("?").join(",");
+	return new Array<string>(quantizedArity(count)).fill("?").join(",");
+}
+
+/** Pad an `IN (...)` clause's bound values up to its quantized placeholder count. */
+function padInClause<T>(values: readonly T[]): (T | null)[] {
+	const arity = quantizedArity(values.length);
+	if (arity === values.length) return values as (T | null)[];
+	const padded: (T | null)[] = [...values];
+	while (padded.length < arity) padded.push(null);
+	return padded;
 }
 
 function queryAll(beam: BeamMemoryState, sql: string, params: readonly DbValue[] = []): Row[] {
@@ -445,16 +469,32 @@ function queryGet(beam: BeamMemoryState, sql: string, params: readonly DbValue[]
 	return (beam.db.query(sql).get(...params) as Row | null) ?? null;
 }
 
+// Table/column existence cannot change mid-process for a given connection, so
+// memoize both checks per beam instead of re-querying sqlite_master/PRAGMA
+// table_info on every recall call (each was running on every recall(),
+// several times over per call across the FTS/facts/embeddings lookups).
 function tableExists(beam: BeamMemoryState, table: string): boolean {
-	return (
+	let cache = beam.caches.tableExistsCache as Map<string, boolean> | undefined;
+	if (cache === undefined) {
+		cache = new Map();
+		beam.caches.tableExistsCache = cache;
+	}
+	const cached = cache.get(table);
+	if (cached !== undefined) return cached;
+	const exists =
 		queryGet(beam, "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name = ?", [table]) !==
-		null
-	);
+		null;
+	cache.set(table, exists);
+	return exists;
 }
 
 function factsHaveScopeColumn(beam: BeamMemoryState): boolean {
+	const cached = beam.caches.factsHaveScopeColumnCache;
+	if (typeof cached === "boolean") return cached;
 	const rows = queryAll(beam, "PRAGMA table_info(facts)");
-	return rows.some(row => asString(row.name) === "scope");
+	const hasScope = rows.some(row => asString(row.name) === "scope");
+	beam.caches.factsHaveScopeColumnCache = hasScope;
+	return hasScope;
 }
 
 function factVisibilityWhere(beam: BeamMemoryState, tableAlias: string): { where: string; params: DbValue[] } {
@@ -608,7 +648,7 @@ function vectorSimilarities(
 		const rows = queryAll(
 			beam,
 			`SELECT memory_id, embedding_json FROM memory_embeddings WHERE memory_id IN (${placeholders(chunk.length)})`,
-			chunk,
+			padInClause(chunk),
 		);
 		for (const row of rows) {
 			const vector = parseEmbedding(row.embedding_json);
@@ -651,7 +691,7 @@ function fetchCandidates(
 			.split(", ")
 			.map(column => `m.${column}`)
 			.join(", ")} FROM ${table} m WHERE m.${keyColumn} IN (${placeholders(idsOrRowids.length)}) AND ${where}`,
-		[...idsOrRowids, ...params],
+		[...padInClause(idsOrRowids), ...params],
 	);
 	const out: MemoryCandidate[] = [];
 	for (const row of rows) {
@@ -834,7 +874,7 @@ function dedupCrossTierSummaryLinks(beam: BeamMemoryState, results: readonly Rec
 	const summaryRows = queryAll(
 		beam,
 		`SELECT id, summary_of FROM episodic_memory WHERE id IN (${placeholders(episodicIds.length)})`,
-		episodicIds,
+		padInClause(episodicIds),
 	);
 	const dropWorking = new Set<string>();
 	const dropEpisodic = new Set<string>();
@@ -878,10 +918,15 @@ function updateRecallCounts(
 		if (ids.length === 0) continue;
 		const table = tierLabel === "working" ? "working_memory" : "episodic_memory";
 		const { where, params } = buildWhere(beam, "", options);
-		beam.db.run(
-			`UPDATE ${table} SET recall_count = COALESCE(recall_count, 0) + 1, last_recalled = ? WHERE id IN (${placeholders(ids.length)}) AND ${where}`,
-			[timestamp, ...ids, ...params],
-		);
+		// `.query(...).run(...)` instead of `.db.run(...)`: `run`/`exec` always
+		// prepare, execute, and finalize fresh, while `.query()` reuses a cached
+		// prepared statement for the same SQL text -- and this UPDATE runs on
+		// every successful recall() call.
+		beam.db
+			.query(
+				`UPDATE ${table} SET recall_count = COALESCE(recall_count, 0) + 1, last_recalled = ? WHERE id IN (${placeholders(ids.length)}) AND ${where}`,
+			)
+			.run(timestamp, ...padInClause(ids), ...params);
 	}
 }
 
@@ -925,7 +970,7 @@ function collectMemoryCandidates(
 			const rows = queryAll(
 				beam,
 				`SELECT rowid, id FROM episodic_memory WHERE id IN (${placeholders(emIds.length)})`,
-				emIds,
+				padInClause(emIds),
 			);
 			emRowids = [...new Set([...emRowids, ...rows.map(row => asNumber(row.rowid)).filter(n => n > 0)])];
 		}
@@ -1140,23 +1185,29 @@ export function factRecall(beam: BeamMemoryState, query: string, topK = 30): Fac
 		}
 	}
 	if (matched.length === 0) {
-		const seen = new Set<number>();
-		for (const token of expandedTokens(query).slice(0, 6)) {
+		// FTS-unavailable/no-match fallback only: `LIKE '%token%'` can't use an
+		// index (leading wildcard), so this is an unindexed scan of `facts`
+		// regardless. Run it once across every token in a single WHERE instead
+		// of once per token (previously up to 6 separate full-table-scan round
+		// trips) and cap the combined result at `topK` instead of `topK` per
+		// token -- a single row satisfying multiple OR branches still only
+		// appears once, so no dedup step is needed.
+		const tokens = expandedTokens(query).slice(0, 6);
+		if (tokens.length > 0) {
 			const visibility = factVisibilityWhere(beam, "");
+			const likeClauses = tokens.map(() => "(subject LIKE ? OR predicate LIKE ? OR object LIKE ?)").join(" OR ");
+			const likeParams = tokens.flatMap(token => [`%${token}%`, `%${token}%`, `%${token}%`]);
 			const rows = queryAll(
 				beam,
 				`SELECT rowid
 				 FROM facts
-				 WHERE (subject LIKE ? OR predicate LIKE ? OR object LIKE ?) AND ${visibility.where}
+				 WHERE (${likeClauses}) AND ${visibility.where}
 				 LIMIT ?`,
-				[`%${token}%`, `%${token}%`, `%${token}%`, ...visibility.params, topK],
+				[...likeParams, ...visibility.params, topK],
 			);
 			for (const row of rows) {
 				const rowid = asNumber(row.rowid);
-				if (rowid > 0 && !seen.has(rowid)) {
-					seen.add(rowid);
-					matched.push({ rowid, rank: 0 });
-				}
+				if (rowid > 0) matched.push({ rowid, rank: 0 });
 			}
 		}
 	}
@@ -1173,7 +1224,7 @@ export function factRecall(beam: BeamMemoryState, query: string, topK = 30): Fac
 		 WHERE rowid IN (${placeholders(rowids.length)}) AND ${visibility.where}
 		 ORDER BY confidence DESC
 		 LIMIT ?`,
-		[...rowids, ...visibility.params, rowids.length],
+		[...padInClause(rowids), ...visibility.params, rowids.length],
 	);
 	return rows
 		.map(row => {

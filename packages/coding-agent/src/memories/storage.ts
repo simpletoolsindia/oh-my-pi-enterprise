@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS threads (
 	source_kind TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads(updated_at);
+
 CREATE TABLE IF NOT EXISTS stage1_outputs (
 	thread_id TEXT PRIMARY KEY,
 	source_updated_at INTEGER NOT NULL,
